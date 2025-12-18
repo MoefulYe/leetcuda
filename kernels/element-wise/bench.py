@@ -2,7 +2,7 @@ import time
 from functools import partial
 from typing import Optional, Callable
 import torch
-import element_wise as lib
+import element_wise as lib # type: ignore
 
 torch.set_grad_enabled(False)
 

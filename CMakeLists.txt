@@ -15,11 +15,24 @@ find_package(pybind11 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Torch REQUIRED PATHS ./.venv/lib/python3.12/site-packages/torch NO_DEFAULT_PATH)
 
-add_library(torch_headers INTERFACE)
-target_include_directories(torch_headers INTERFACE
+find_library(
+  TORCH_PYTHON_LIBRARY
+  NAMES torch_python
+  PATHS "${TORCH_INSTALL_PREFIX}/lib"
+        "${CMAKE_SOURCE_DIR}/.venv/lib/python3.12/site-packages/torch/lib"
+  NO_DEFAULT_PATH
+)
+
+if(NOT TORCH_PYTHON_LIBRARY)
+  message(FATAL_ERROR "torch_python library not found; set TORCH_INSTALL_PREFIX or adjust the search path.")
+endif()
+
+add_library(torch-deps INTERFACE)
+target_include_directories(torch-deps INTERFACE
     ${CMAKE_SOURCE_DIR}/.venv/lib/python3.12/site-packages/torch/include
     ${CMAKE_SOURCE_DIR}/.venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include
 )
+target_link_libraries(torch-deps INTERFACE ${TORCH_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
 
 add_subdirectory(others)
 add_subdirectory(kernels)
