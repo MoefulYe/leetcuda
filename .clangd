@@ -1,0 +1,16 @@
+CompileFlags:
+    Remove:
+        - "--generate-code=arch=compute_86,code=[compute_86,sm_86]"
+        - "-forward-unknown-to-host-compiler"
+        - "-Xcompiler=-fPIC"
+        - "-Xcompiler=-fvisibility=hidden"
+    Add:
+        - "-std=c++20"
+        - "--cuda-gpu-arch=sm_86"
+        - "--cuda-path=/nix/store/h049g14b6jpssivi6hv9ibwp0wk7f2fi-cuda-merged-12.8"
+        - "-isystem"
+        - "/nix/store/kzq78n13l8w24jn8bx4djj79k5j717f1-gcc-14.3.0/include/c++/14.3.0"
+        - "-isystem"
+        - "/nix/store/kzq78n13l8w24jn8bx4djj79k5j717f1-gcc-14.3.0/include/c++/14.3.0/x86_64-unknown-linux-gnu"
+        - "-isystem"
+        - "/nix/store/gi4cz4ir3zlwhf1azqfgxqdnczfrwsr7-glibc-2.40-66-dev/include"

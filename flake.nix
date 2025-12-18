@@ -1,0 +1,91 @@
+{
+  description = "LeetCUDA CUDA dev environment (NixOS + uv venv)";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs =
+    { self, nixpkgs }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs {
+        inherit system;
+        config = {
+          allowUnfree = true;
+          cudaSupport = true;
+        };
+      };
+
+      pythonPackages = pkgs.python312Packages;
+      python = pythonPackages.python;
+      pybind11 = pythonPackages.pybind11;
+      cudaPackages = pkgs.cudaPackages_12_8;
+      llvm = pkgs.llvmPackages_21;
+      clang-tools = llvm.clang-tools;
+      stdenv = llvm.stdenv;
+    in
+    {
+      formatter.${system} = pkgs.alejandra;
+
+      devShells.${system}.default =
+        pkgs.mkShell.override
+          {
+            inherit stdenv;
+          }
+          {
+            name = "leetcuda";
+
+            buildInputs = with pkgs; [
+              cudaPackages.cudatoolkit
+            ];
+            nativeBuildInputs = with pkgs; [
+              cudaPackages.nsight_compute
+              cudaPackages.nsight_systems
+              python
+              pybind11
+              uv
+              cmake
+              ninja
+              pkg-config
+              clang-tools
+              git
+            ];
+
+            shellHook =
+              let
+                ld_libpath = pkgs.lib.makeLibraryPath [
+                  pkgs.stdenv.cc.cc.lib
+                  pkgs.glibc
+                ];
+              in
+              ''
+                export DISABLE_DIRENV=1
+
+                # Speed up PyTorch extension compilation on RTX 3080 (Ampere, sm_86).
+                export TORCH_CUDA_ARCH_LIST="8.6"
+
+                # CUDA toolkit path for build tooling (nvcc, headers, etc.)
+                export CUDA_HOME=${cudaPackages.cudatoolkit}
+                export CUDA_PATH=${cudaPackages.cudatoolkit}
+                export CUDACXX=${cudaPackages.cudatoolkit}/bin/nvcc
+
+                # Keep LD_LIBRARY_PATH to avoid runtime "cannot open shared object file".
+                # On NixOS, NVIDIA driver libs are typically exposed via /run/opengl-driver/lib.
+                driver_lib="/run/opengl-driver/lib"
+                driver_lib32="/run/opengl-driver-32/lib"
+
+
+                export LD_LIBRARY_PATH="$driver_lib:$driver_lib32:${ld_libpath}"
+
+                # Create & activate a local venv via uv (install torch wheels inside it).
+                if [ ! -d ".venv" ]; then
+                  uv venv
+                fi
+                source .venv/bin/activate
+                export PATH="''${PWD}/.venv/bin:''${PATH}"
+                export TORCH_CUDA_ARCH_LIST="8.6"
+              '';
+          };
+    };
+}
