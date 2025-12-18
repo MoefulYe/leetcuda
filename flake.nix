@@ -35,11 +35,8 @@
           }
           {
             name = "leetcuda";
-
-            buildInputs = with pkgs; [
+            packages = with pkgs; [
               cudaPackages.cudatoolkit
-            ];
-            nativeBuildInputs = with pkgs; [
               cudaPackages.nsight_compute
               cudaPackages.nsight_systems
               python
