@@ -33,6 +33,20 @@ target_include_directories(torch-deps INTERFACE
     ${CMAKE_SOURCE_DIR}/.venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include
 )
 target_link_libraries(torch-deps INTERFACE ${TORCH_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
+add_library(cuda_compile_flags INTERFACE)
+target_compile_options(cuda_compile_flags INTERFACE
+  $<$<COMPILE_LANGUAGE:CUDA>:
+    -U__CUDA_NO_HALF_OPERATORS__
+    -U__CUDA_NO_HALF_CONVERSIONS__
+    -U__CUDA_NO_HALF2_OPERATORS__
+    -U__CUDA_NO_BFLOAT16_CONVERSIONS__
+    --expt-relaxed-constexpr
+    --expt-extended-lambda
+    --use_fast_math
+  >
+)
+
+
 
 add_subdirectory(others)
 add_subdirectory(kernels)
