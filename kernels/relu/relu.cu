@@ -164,7 +164,7 @@ __global__ auto relu_f16x8_pack_kernel(const half *__restrict__ input,
       const int S = input.size(0);                                             \
       const int K = input.size(1);                                             \
       const int N = S * K;                                                     \
-      if ((K / (N)) <= 1024) {                                                 \
+      if ((K / (PACKED_N)) <= 1024) {                                          \
         dim3 block(K / (PACKED_N));                                            \
         dim3 grid(S);                                                          \
         relu_##PackedType##_kernel<<<grid, block>>>(                           \
