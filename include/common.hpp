@@ -1,10 +1,8 @@
-#include <concepts>
 #include <cstdint>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_fp8.h>
 #include <stdint.h>
-#include <type_traits>
 #include <vector_types.h>
 
 using i8 = int8_t;
@@ -21,7 +19,7 @@ using f8e4m3 = __nv_fp8_e4m3;
 using f16 = half;
 using f32 = float;
 using f64 = double;
-using b16 = nv_bfloat16;
+using bf16 = nv_bfloat16;
 
 using f8e4m3x2 = __nv_fp8x2_e4m3;
 using f8e4m3x4 = __nv_fp8x4_e4m3;
@@ -31,7 +29,7 @@ using f16x2 = half2;
 using f32x2 = float2;
 using f32x4 = float4;
 using f64x2 = double2;
-using b16x2 = nv_bfloat162;
+using bf16x2 = nv_bfloat162;
 using i8x2 = char2;
 using i8x4 = char4;
 using u8x2 = uchar2;
@@ -70,13 +68,13 @@ template <> inline constexpr f32 ZERO<f32> = 0.0f;
 template <> inline constexpr f64 ZERO<f64> = 0.0;
 
 template <> inline constexpr f16 ZERO<f16> = {};
-template <> inline constexpr b16 ZERO<b16> = {};
+template <> inline constexpr bf16 ZERO<bf16> = {};
 
 template <> inline constexpr f32x4 ZERO<f32x4> = {0.0f, 0.0f, 0.0f, 0.0f};
 template <> inline constexpr f32x2 ZERO<f32x2> = {0.0f, 0.0f};
 
 template <> inline constexpr f16x2 ZERO<f16x2> = {};
-template <> inline constexpr b16x2 ZERO<b16x2> = {};
+template <> inline constexpr bf16x2 ZERO<bf16x2> = {};
 template <> inline constexpr f64x2 ZERO<f64x2> = {0.0, 0.0};
 
 template <typename Pack> inline constexpr auto PackSize = 0;
@@ -124,9 +122,9 @@ template <> struct VectorTraits<f16x2> {
   using Scalar = f16;
 };
 
-template <> struct VectorTraits<b16x2> {
+template <> struct VectorTraits<bf16x2> {
   static constexpr int SIZE = 2;
-  using Scalar = b16;
+  using Scalar = bf16;
 };
 
 template <> struct VectorTraits<f64x2> {
@@ -228,7 +226,7 @@ static_assert(IsVectorOf<f8e5m2x2, f8e5m2>);
 static_assert(IsVectorOf<f32x4, f32>);
 static_assert(IsVectorOf<f32x2, f32>);
 static_assert(IsVectorOf<f16x2, f16>);
-static_assert(IsVectorOf<b16x2, b16>);
+static_assert(IsVectorOf<bf16x2, bf16>);
 static_assert(IsVectorOf<f64x2, f64>);
 static_assert(IsVectorOf<i8x4, i8>);
 static_assert(IsVectorOf<i8x2, i8>);

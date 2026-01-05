@@ -60,20 +60,20 @@ auto __device__ __forceinline__ thread_reduce<f16x2, f32>(f16x2 v) -> f32 {
 }
 
 template <>
-auto __device__ __forceinline__ thread_reduce<b16x2, b16>(b16x2 v) -> b16 {
+auto __device__ __forceinline__ thread_reduce<bf16x2, bf16>(bf16x2 v) -> bf16 {
   return v.x + v.y;
 }
 
 template <>
-auto __device__ __forceinline__ thread_reduce<b16x2, f32>(b16x2 v) -> f32 {
+auto __device__ __forceinline__ thread_reduce<bf16x2, f32>(bf16x2 v) -> f32 {
   return f32{v.x} + f32{v.y};
 }
 
 static_assert(ThreadReduceable<f32x4, f32>);
 static_assert(ThreadReduceable<f16x2, f16>);
 static_assert(ThreadReduceable<f16x2, f32>);
-static_assert(ThreadReduceable<b16x2, b16>);
-static_assert(ThreadReduceable<b16x2, f32>);
+static_assert(ThreadReduceable<bf16x2, bf16>);
+static_assert(ThreadReduceable<bf16x2, f32>);
 
 template <typename Scalar, typename Acc = Scalar,
           const int NUM_ELEM_PER_BLOCK = 256>
@@ -436,20 +436,21 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     return y;                                                                  \
   }
 
-// scalar_tag, acc_tag, th_type, scalar_t, acc_t
-TORCH_BINDING_REDUCE_SCALAR(f32, f32, torch::kFloat32, f32, f32)
 TORCH_BINDING_REDUCE_SCALAR(f16, f32, torch::kHalf, f16, f32)
-TORCH_BINDING_REDUCE_SCALAR(bf16, f32, torch::kBFloat16, b16, f32)
+TORCH_BINDING_REDUCE_SCALAR(bf16, f32, torch::kBFloat16, bf16, f32)
 
-// vec_tag, acc_tag, th_type, scalar_t, acc_t, vec_t
-TORCH_BINDING_REDUCE_VECTOR(f32x4, f32, torch::kFloat32, f32, f32x4, f32)
 TORCH_BINDING_REDUCE_VECTOR(f16x2, f32, torch::kHalf, f16, f16x2, f32)
-TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, b16, b16x2, f32)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, bf16, bf16x2, f32)
 
-// scalar_tag, acc_tag, th_type, scalar_t, acc_t
 TORCH_BINDING_REDUCE_PACK(f32, f32, torch::kFloat32, f32, f32)
-TORCH_BINDING_REDUCE_PACK(f16, f32, torch::kHalf, f16, f32)
-TORCH_BINDING_REDUCE_PACK(bf16, f32, torch::kBFloat16, b16, f32)
+TORCH_BINDING_REDUCE_PACK(bf16, f32, torch::kBFloat16, bf16, f32)
+
+// f32
+TORCH_BINDING_REDUCE_SCALAR(f32, f32, torch::kFloat32, f32, f32)
+TORCH_BINDING_REDUCE_VECTOR(f32x4, f32, torch::kFloat32, f32, f32x4, f32)
+
+// f16
+TORCH_BINDING_REDUCE_PACK(f16, f16, torch::kHalf, f16, f16)
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f32_f32)
