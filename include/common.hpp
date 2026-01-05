@@ -398,50 +398,60 @@ static_assert(IsVectorOf<u64x2, u64>);
 
 template <typename ScalarType> struct CudaToTorchType {};
 
-template <> struct CudaToTorchType<f8e4m3> {
-  static constexpr auto torch_type = torch::kFloat8_e4m3fn;
-};
-
-template <> struct CudaToTorchType<f8e5m2> {
-  static constexpr auto torch_type = torch::kFloat8_e5m2;
-};
-
-template <> struct CudaToTorchType<f16> {
-  static constexpr auto torch_type = torch::kFloat16;
-};
-
-template <> struct CudaToTorchType<bf16> {
-  static constexpr auto torch_type = torch::kBFloat16;
-};
-
-template <> struct CudaToTorchType<f32> {
-  static constexpr auto torch_type = torch::kFloat32;
-};
-
-template <> struct CudaToTorchType<f64> {
-  static constexpr auto torch_type = torch::kFloat64;
-};
-
-template <> struct CudaToTorchType<i8> {
-  static constexpr auto torch_type = torch::kInt8;
-};
-
-template <> struct CudaToTorchType<i16> {
-  static constexpr auto torch_type = torch::kInt16;
-};
-
-template <> struct CudaToTorchType<i32> {
-  static constexpr auto torch_type = torch::kInt32;
-};
-
-template <> struct CudaToTorchType<i64> {
-  static constexpr auto torch_type = torch::kInt64;
-};
-
-template <> struct CudaToTorchType<u8> {
-  static constexpr auto torch_type = torch::kUInt8;
-};
-
 template <typename ScalarType>
-constexpr torch::ScalarType CUDA_TO_TORCH_TYPE =
-    CudaToTorchType<ScalarType>::torch_type;
+constexpr auto cuda_to_torch_type() -> torch::ScalarType = delete;
+
+template <> constexpr auto cuda_to_torch_type<f8e4m3>() -> torch::ScalarType {
+  return torch::kFloat8_e4m3fn;
+}
+
+template <> constexpr auto cuda_to_torch_type<f8e5m2>() -> torch::ScalarType {
+  return torch::kFloat8_e5m2;
+}
+
+template <> constexpr auto cuda_to_torch_type<f16>() -> torch::ScalarType {
+  return torch::kFloat16;
+}
+
+template <> constexpr auto cuda_to_torch_type<bf16>() -> torch::ScalarType {
+  return torch::kBFloat16;
+}
+
+template <> constexpr auto cuda_to_torch_type<f32>() -> torch::ScalarType {
+  return torch::kFloat32;
+}
+
+template <> constexpr auto cuda_to_torch_type<f64>() -> torch::ScalarType {
+  return torch::kFloat64;
+}
+
+template <> constexpr auto cuda_to_torch_type<i8>() -> torch::ScalarType {
+  return torch::kInt8;
+}
+
+template <> constexpr auto cuda_to_torch_type<i16>() -> torch::ScalarType {
+  return torch::kInt16;
+}
+
+template <> constexpr auto cuda_to_torch_type<i32>() -> torch::ScalarType {
+  return torch::kInt32;
+}
+
+template <> constexpr auto cuda_to_torch_type<i64>() -> torch::ScalarType {
+  return torch::kInt64;
+}
+
+template <> constexpr auto cuda_to_torch_type<u8>() -> torch::ScalarType {
+  return torch::kUInt8;
+}
+template <> constexpr auto cuda_to_torch_type<u16>() -> torch::ScalarType {
+  return torch::kUInt16;
+}
+
+template <> constexpr auto cuda_to_torch_type<u32>() -> torch::ScalarType {
+  return torch::kUInt32;
+}
+
+template <> constexpr auto cuda_to_torch_type<u64>() -> torch::ScalarType {
+  return torch::kUInt64;
+}

@@ -334,7 +334,7 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
     auto x_contig = x.contiguous();                                            \
     auto y = torch::zeros(                                                     \
-        {1}, x_contig.options().dtype(CUDA_TO_TORCH_TYPE<acc_t>));             \
+        {1}, x_contig.options().dtype(cuda_to_torch_type<acc_t>()));           \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \
@@ -373,7 +373,7 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
     auto x_contig = x.contiguous();                                            \
     auto y = torch::zeros(                                                     \
-        {1}, x_contig.options().dtype(CUDA_TO_TORCH_TYPE<acc_t>));             \
+        {1}, x_contig.options().dtype(cuda_to_torch_type<acc_t>()));           \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \
@@ -409,7 +409,7 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
     auto x_contig = x.contiguous();                                            \
     auto y = torch::zeros(                                                     \
-        {1}, x_contig.options().dtype(CUDA_TO_TORCH_TYPE<acc_t>));             \
+        {1}, x_contig.options().dtype(cuda_to_torch_type<acc_t>()));           \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \

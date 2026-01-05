@@ -1,52 +1,16 @@
-import time
+import os
+import sys
 from functools import partial
-from typing import Optional, Callable
 import torch
 import element_wise as lib # type: ignore
 
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from bench_utils import run_benchmark  # noqa: E402
+
 torch.set_grad_enabled(False)
-
-
-def run_benchmark(
-    perf_func: Callable,
-    a: torch.Tensor,
-    b: torch.Tensor,
-    tag: str,
-    out: Optional[torch.Tensor] = None,
-    warmup: int = 10,
-    iters: int = 1000,
-    show_all: bool = False,
-):
-    # torch.dot vs custom dot_prod kernel
-    if out is not None:
-        out.fill_(0)
-    # warmup
-    if out is not None:
-        for i in range(warmup):
-            perf_func(a, b, out)
-    else:
-        for i in range(warmup):
-            _ = perf_func(a, b)
-    torch.cuda.synchronize()
-    start = time.time()
-    # iters
-    if out is not None:
-        for i in range(iters):
-            perf_func(a, b, out)
-    else:
-        for i in range(iters):
-            out = perf_func(a, b)
-    torch.cuda.synchronize()
-    end = time.time()
-    total_time = (end - start) * 1000  # ms
-    mean_time = total_time / iters
-    out_info = f"out_{tag}"
-    out_val = out.flatten().detach().cpu().numpy().tolist()[:2] # type: ignore
-    out_val = [round(v, 8) for v in out_val]
-    print(f"{out_info:>18}: {out_val}, time:{mean_time:.8f}ms")
-    if show_all:
-        print(out)
-    return out, mean_time
 
 
 Ss = [1024, 2048, 4096]
