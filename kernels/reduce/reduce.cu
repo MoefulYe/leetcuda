@@ -4,8 +4,6 @@
 // `__clang_cuda_runtime_wrapper.h`, which defines `__noinline__` as a macro.
 // That macro breaks libstdc++ which uses `__attribute__((__noinline__, ...))`.
 // Undefine it for clang-only parsing before including any libstdc++ headers.
-#include <c10/core/ScalarType.h>
-#include <torch/headeronly/util/BFloat16.h>
 #if defined(__clang__)
 #ifdef __noinline__
 #undef __noinline__
@@ -94,7 +92,7 @@ __global__ auto reduce_scalar_kernel(const Scalar *__restrict__ input,
   const auto idx = blockDim.x * bid + tid;     // 线程全局id
 
   const Acc val = (idx < n) ? static_cast<Acc>(input[idx])
-                            : ZERO<Acc>;      // 读取输入数据，越界则为0
+                            : zero<Acc>();    // 读取输入数据，越界则为0
   const Acc warp_acc = butterfly_reduce(val); // 计算warp内的规约和
   if (laneid == 0) { // 每个warp的第一个线程将部分和存入共享内存
     reduce_smem[warpid] = warp_acc;
@@ -103,7 +101,7 @@ __global__ auto reduce_scalar_kernel(const Scalar *__restrict__ input,
   if (warpid == 0) {
     const Acc warp_acc = (laneid < NUM_WARPS_PER_BLOCK)
                              ? reduce_smem[laneid]
-                             : ZERO<Acc>;             // 读取每个warp的部分和
+                             : zero<Acc>();           // 读取每个warp的部分和
     const Acc block_acc = butterfly_reduce(warp_acc); // 计算block内的规约和
     if (laneid == 0) {
       atomicAdd(output, block_acc); // 使用原子操作将结果累加到输出
@@ -134,13 +132,13 @@ __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
   const auto laneid = threadIdx.x % WARP_SIZE; // 线程在warp内的id
   const auto idx = (blockDim.x * bid + tid) *
                    NUM_ELEMS_PER_PACK; // 线程的打包加载的第一个元素的id
-  Scalar pack[NUM_ELEMS_PER_PACK];
+  alignas(16) Scalar pack[NUM_ELEMS_PER_PACK];
   __128_BITS_MUT(pack[0]) = __128_BITS(input[idx]);
-  auto thread_acc = ZERO<Acc>;
+  auto thread_acc = zero<Acc>();
 #pragma unroll
   for (auto i = 0; i < NUM_ELEMS_PER_PACK; i++) {
     const Acc val = (idx + i < n) ? static_cast<Acc>(pack[i])
-                                  : ZERO<Acc>; // 读取输入数据，越界则为0
+                                  : zero<Acc>(); // 读取输入数据，越界则为0
     thread_acc = thread_acc + val;
   }
   const Acc warp_acc = butterfly_reduce(thread_acc); // 计算warp内的规约和
@@ -152,7 +150,7 @@ __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
     const Acc warp_acc =
         (laneid < (NUM_THREADS_PER_BLOCK + WARP_SIZE - 1) / WARP_SIZE)
             ? reduce_smem[laneid]
-            : ZERO<Acc>;                              // 读取每个warp的部分和
+            : zero<Acc>();                            // 读取每个warp的部分和
     const Acc block_acc = butterfly_reduce(warp_acc); // 计算block内的规约和
     if (laneid == 0) {
       atomicAdd(output, block_acc); // 使用原子操作将结果累加到输出
@@ -178,7 +176,7 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
   const auto idx = (blockDim.x * bid + tid) * VectorTraits<Vector>::SIZE;
   const Vector vec = (idx < n)
                          ? (reinterpret_cast<const Vector *>(&input[idx]))[0]
-                         : ZERO<Vector>;
+                         : zero<Vector>();
   const Acc thread_acc = thread_reduce<Vector, Acc>(vec);
   const auto warpid = threadIdx.x / WARP_SIZE;
   const auto laneid = threadIdx.x % WARP_SIZE;
@@ -189,7 +187,7 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
   __syncthreads();
   if (warpid == 0) {
     const Acc warp_acc =
-        (laneid < NUM_WARPS_PER_BLOCK) ? reduce_smem[laneid] : ZERO<Acc>;
+        (laneid < NUM_WARPS_PER_BLOCK) ? reduce_smem[laneid] : zero<Acc>();
     const Acc block_acc = butterfly_reduce(warp_acc);
     if (laneid == 0) {
       atomicAdd(output, block_acc);
@@ -335,7 +333,8 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     CHECK_CUDA(x)                                                              \
     CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
     auto x_contig = x.contiguous();                                            \
-    auto y = torch::zeros({1}, x_contig.options().dtype(torch::kFloat32));     \
+    auto y = torch::zeros(                                                     \
+        {1}, x_contig.options().dtype(CUDA_TO_TORCH_TYPE<acc_t>));             \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \
@@ -373,7 +372,8 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     CHECK_CUDA(x)                                                              \
     CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
     auto x_contig = x.contiguous();                                            \
-    auto y = torch::zeros({1}, x_contig.options().dtype(torch::kFloat32));     \
+    auto y = torch::zeros(                                                     \
+        {1}, x_contig.options().dtype(CUDA_TO_TORCH_TYPE<acc_t>));             \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \
@@ -408,7 +408,8 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     CHECK_CUDA(x)                                                              \
     CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
     auto x_contig = x.contiguous();                                            \
-    auto y = torch::zeros({1}, x_contig.options().dtype(torch::kFloat32));     \
+    auto y = torch::zeros(                                                     \
+        {1}, x_contig.options().dtype(CUDA_TO_TORCH_TYPE<acc_t>));             \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \

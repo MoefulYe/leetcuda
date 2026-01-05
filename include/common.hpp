@@ -1,8 +1,12 @@
+#include <concepts>
 #include <cstdint>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_fp8.h>
 #include <stdint.h>
+#include <torch/headeronly/core/ScalarType.h>
+#include <torch/types.h>
+#include <type_traits>
 #include <vector_types.h>
 
 using i8 = int8_t;
@@ -63,21 +67,168 @@ using __128_bits = float4;
 #define F32X4_MUT(lvalue) (reinterpret_cast<f32x4 *>(&(lvalue))[0])
 #define __128_BITS_MUT(lvalue) (reinterpret_cast<__128_bits *>(&(lvalue))[0])
 
-template <typename T> inline constexpr auto ZERO = T{};
-template <> inline constexpr f32 ZERO<f32> = 0.0f;
-template <> inline constexpr f64 ZERO<f64> = 0.0;
+template <typename T>
+__device__ __host__ __forceinline__ auto zero() -> T = delete;
 
-template <> inline constexpr f16 ZERO<f16> = {};
-template <> inline constexpr bf16 ZERO<bf16> = {};
+template <> __device__ __host__ __forceinline__ auto zero<f32>() -> f32 {
+  return 0.0f;
+}
 
-template <> inline constexpr f32x4 ZERO<f32x4> = {0.0f, 0.0f, 0.0f, 0.0f};
-template <> inline constexpr f32x2 ZERO<f32x2> = {0.0f, 0.0f};
+template <> __device__ __host__ __forceinline__ auto zero<f64>() -> f64 {
+  return 0.0;
+}
 
-template <> inline constexpr f16x2 ZERO<f16x2> = {};
-template <> inline constexpr bf16x2 ZERO<bf16x2> = {};
-template <> inline constexpr f64x2 ZERO<f64x2> = {0.0, 0.0};
+template <> __device__ __host__ __forceinline__ auto zero<i8>() -> i8 {
+  return static_cast<i8>(0);
+}
 
-template <typename Pack> inline constexpr auto PackSize = 0;
+template <> __device__ __host__ __forceinline__ auto zero<i16>() -> i16 {
+  return static_cast<i16>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i32>() -> i32 {
+  return static_cast<i32>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i64>() -> i64 {
+  return static_cast<i64>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u8>() -> u8 {
+  return static_cast<u8>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u16>() -> u16 {
+  return static_cast<u16>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u32>() -> u32 {
+  return static_cast<u32>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u64>() -> u64 {
+  return static_cast<u64>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<f16>() -> f16 {
+  return f16{};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<bf16>() -> bf16 {
+  return bf16{};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<f8e4m3>() -> f8e4m3 {
+  return f8e4m3{};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<f8e5m2>() -> f8e5m2 {
+  return f8e5m2{};
+}
+
+template <>
+__device__ __host__ __forceinline__ auto zero<f8e4m3x2>() -> f8e4m3x2 {
+  return f8e4m3x2{};
+}
+
+template <>
+__device__ __host__ __forceinline__ auto zero<f8e4m3x4>() -> f8e4m3x4 {
+  return f8e4m3x4{};
+}
+
+template <>
+__device__ __host__ __forceinline__ auto zero<f8e5m2x2>() -> f8e5m2x2 {
+  return f8e5m2x2{};
+}
+
+template <>
+__device__ __host__ __forceinline__ auto zero<f8e5m2x4>() -> f8e5m2x4 {
+  return f8e5m2x4{};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<f16x2>() -> f16x2 {
+  return f16x2{};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<bf16x2>() -> bf16x2 {
+  return bf16x2{};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<f32x2>() -> f32x2 {
+  return f32x2{0.0f, 0.0f};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<f32x4>() -> f32x4 {
+  return f32x4{0.0f, 0.0f, 0.0f, 0.0f};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<f64x2>() -> f64x2 {
+  return f64x2{0.0, 0.0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i8x2>() -> i8x2 {
+  return i8x2{0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i8x4>() -> i8x4 {
+  return i8x4{0, 0, 0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u8x2>() -> u8x2 {
+  return u8x2{0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u8x4>() -> u8x4 {
+  return u8x4{0, 0, 0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i16x2>() -> i16x2 {
+  return i16x2{0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i16x4>() -> i16x4 {
+  return i16x4{0, 0, 0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u16x2>() -> u16x2 {
+  return u16x2{0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u16x4>() -> u16x4 {
+  return u16x4{0, 0, 0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i32x2>() -> i32x2 {
+  return i32x2{0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i32x4>() -> i32x4 {
+  return i32x4{0, 0, 0, 0};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u32x2>() -> u32x2 {
+  return u32x2{0u, 0u};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u32x4>() -> u32x4 {
+  return u32x4{0u, 0u, 0u, 0u};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i64x2>() -> i64x2 {
+  return i64x2{0ll, 0ll};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<i64x4>() -> i64x4 {
+  return i64x4{0ll, 0ll, 0ll, 0ll};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u64x2>() -> u64x2 {
+  return u64x2{0ull, 0ull};
+}
+
+template <> __device__ __host__ __forceinline__ auto zero<u64x4>() -> u64x4 {
+  return u64x4{0ull, 0ull, 0ull, 0ull};
+}
 
 template <typename T> struct VectorTraits {
   // 默认大小为 0，表示这不是一个向量
@@ -244,3 +395,53 @@ static_assert(IsVectorOf<i64x4, i64>);
 static_assert(IsVectorOf<i64x2, i64>);
 static_assert(IsVectorOf<u64x4, u64>);
 static_assert(IsVectorOf<u64x2, u64>);
+
+template <typename ScalarType> struct CudaToTorchType {};
+
+template <> struct CudaToTorchType<f8e4m3> {
+  static constexpr auto torch_type = torch::kFloat8_e4m3fn;
+};
+
+template <> struct CudaToTorchType<f8e5m2> {
+  static constexpr auto torch_type = torch::kFloat8_e5m2;
+};
+
+template <> struct CudaToTorchType<f16> {
+  static constexpr auto torch_type = torch::kFloat16;
+};
+
+template <> struct CudaToTorchType<bf16> {
+  static constexpr auto torch_type = torch::kBFloat16;
+};
+
+template <> struct CudaToTorchType<f32> {
+  static constexpr auto torch_type = torch::kFloat32;
+};
+
+template <> struct CudaToTorchType<f64> {
+  static constexpr auto torch_type = torch::kFloat64;
+};
+
+template <> struct CudaToTorchType<i8> {
+  static constexpr auto torch_type = torch::kInt8;
+};
+
+template <> struct CudaToTorchType<i16> {
+  static constexpr auto torch_type = torch::kInt16;
+};
+
+template <> struct CudaToTorchType<i32> {
+  static constexpr auto torch_type = torch::kInt32;
+};
+
+template <> struct CudaToTorchType<i64> {
+  static constexpr auto torch_type = torch::kInt64;
+};
+
+template <> struct CudaToTorchType<u8> {
+  static constexpr auto torch_type = torch::kUInt8;
+};
+
+template <typename ScalarType>
+constexpr torch::ScalarType CUDA_TO_TORCH_TYPE =
+    CudaToTorchType<ScalarType>::torch_type;
