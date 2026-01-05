@@ -4,6 +4,8 @@
 // `__clang_cuda_runtime_wrapper.h`, which defines `__noinline__` as a macro.
 // That macro breaks libstdc++ which uses `__attribute__((__noinline__, ...))`.
 // Undefine it for clang-only parsing before including any libstdc++ headers.
+#include <c10/core/ScalarType.h>
+#include <torch/headeronly/util/BFloat16.h>
 #if defined(__clang__)
 #ifdef __noinline__
 #undef __noinline__
@@ -436,32 +438,62 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     return y;                                                                  \
   }
 
-TORCH_BINDING_REDUCE_SCALAR(f16, f32, torch::kHalf, f16, f32)
-TORCH_BINDING_REDUCE_SCALAR(bf16, f32, torch::kBFloat16, bf16, f32)
-
-TORCH_BINDING_REDUCE_VECTOR(f16x2, f32, torch::kHalf, f16, f16x2, f32)
-TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, bf16, bf16x2, f32)
-
-TORCH_BINDING_REDUCE_PACK(f32, f32, torch::kFloat32, f32, f32)
-TORCH_BINDING_REDUCE_PACK(bf16, f32, torch::kBFloat16, bf16, f32)
-
 // f32
 TORCH_BINDING_REDUCE_SCALAR(f32, f32, torch::kFloat32, f32, f32)
 TORCH_BINDING_REDUCE_VECTOR(f32x4, f32, torch::kFloat32, f32, f32x4, f32)
 
 // f16
+TORCH_BINDING_REDUCE_SCALAR(f16, f16, torch::kHalf, f16, f16)
+TORCH_BINDING_REDUCE_SCALAR(f16, f32, torch::kHalf, f16, f32)
+TORCH_BINDING_REDUCE_VECTOR(f16x2, f16, torch::kHalf, f16, f16x2, f16)
+TORCH_BINDING_REDUCE_VECTOR(f16x2, f32, torch::kHalf, f16, f16x2, f32)
 TORCH_BINDING_REDUCE_PACK(f16, f16, torch::kHalf, f16, f16)
+TORCH_BINDING_REDUCE_PACK(f16, f32, torch::kHalf, f16, f32)
+
+// bf16
+TORCH_BINDING_REDUCE_SCALAR(bf16, bf16, torch::kBFloat16, bf16, bf16)
+TORCH_BINDING_REDUCE_SCALAR(bf16, f32, torch::kBFloat16, bf16, f32)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2, bf16, torch::kBFloat16, bf16, bf16x2, bf16)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, bf16, bf16x2, f32)
+TORCH_BINDING_REDUCE_PACK(bf16, bf16, torch::kBFloat16, bf16, bf16)
+TORCH_BINDING_REDUCE_PACK(bf16, f32, torch::kBFloat16, bf16, f32)
+
+// f8e4m3
+TORCH_BINDING_REDUCE_SCALAR(f8e4m3, f16, torch::kFloat8_e4m3fn, f8e4m3, f16)
+TORCH_BINDING_REDUCE_PACK(f8e4m3, f16, torch::kFloat8_e4m3fn, f8e4m3, f16)
+
+// f8e5m2
+TORCH_BINDING_REDUCE_SCALAR(f8e5m2, f16, torch::kFloat8_e5m2, f8e5m2, f16)
+TORCH_BINDING_REDUCE_PACK(f8e5m2, f16, torch::kFloat8_e5m2, f8e5m2, f16)
+
+// i8
+TORCH_BINDING_REDUCE_SCALAR(i8, i32, torch::kInt8, i8, i32)
+TORCH_BINDING_REDUCE_PACK(i8, i32, torch::kInt8, i8, i32)
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f32_f32)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f16_f32)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_bf16_f32)
-
   TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f32x4_f32)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f16x2_f32)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_bf16x2_f32)
 
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f32_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f16_f16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f16_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f16x2_f16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f16x2_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f16_f16)
   TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f16_f32)
+
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_bf16_bf16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_bf16_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_bf16x2_bf16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_bf16x2_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_bf16_bf16)
   TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_bf16_f32)
+
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f8e4m3_f16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f8e4m3_f16)
+
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f8e5m2_f16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f8e5m2_f16)
+
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_i8_i32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_i8_i32)
 }
