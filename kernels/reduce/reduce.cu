@@ -29,20 +29,20 @@
 constexpr auto WARP_SIZE = 32;
 
 template <typename T>
-__forceinline__ __device__ auto butterfly_reduce_sum(T val) -> T {
+__forceinline__ __device__ auto butterfly_reduce(T val) -> T {
   for (auto mask = WARP_SIZE >> 1; mask > 0; mask = mask >> 1) {
     val = val + __shfl_xor_sync(__activemask(), val, mask);
   }
   return val;
 }
 
-template <typename Vector, typename Sum>
+template <typename Vector, typename Acc>
 concept ThreadReduceable = requires(Vector v) {
-  { thread_reduce<Vector, Sum>(v) } -> std::same_as<Sum>;
+  { thread_reduce<Vector, Acc>(v) } -> std::same_as<Acc>;
 };
 
-template <typename Vector, typename Sum>
-auto __device__ __forceinline__ thread_reduce(Vector v) -> Sum = delete;
+template <typename Vector, typename Acc>
+auto __device__ __forceinline__ thread_reduce(Vector v) -> Acc = delete;
 
 template <>
 auto __device__ __forceinline__ thread_reduce<f32x4, f32>(f32x4 v) -> f32 {
@@ -75,14 +75,14 @@ static_assert(ThreadReduceable<f16x2, f32>);
 static_assert(ThreadReduceable<b16x2, b16>);
 static_assert(ThreadReduceable<b16x2, f32>);
 
-template <typename Scalar, typename Sum = Scalar,
+template <typename Scalar, typename Acc = Scalar,
           const int NUM_ELEM_PER_BLOCK = 256>
 __global__ auto reduce_scalar_kernel(const Scalar *__restrict__ input,
-                                     Sum *__restrict__ output, int n) -> void {
+                                     Acc *__restrict__ output, int n) -> void {
   constexpr auto NUM_THREADS_PER_BLOCK = NUM_ELEM_PER_BLOCK;
   constexpr auto NUM_WARPS_PER_BLOCK = (NUM_THREADS_PER_BLOCK + WARP_SIZE - 1) /
                                        WARP_SIZE;  // 计算每个block中的warp数量
-  __shared__ Sum reduce_smem[NUM_WARPS_PER_BLOCK]; // 用于存储每个warp的部分和
+  __shared__ Acc reduce_smem[NUM_WARPS_PER_BLOCK]; // 用于存储每个warp的部分和
   // assert(NUM_THREADS_PER_BLOCK == blockDim.x);
   // assert(blockDim.x <= KWARP_SIZE * KWARP_SIZE);
   const auto tid = threadIdx.x;                // 线程在block内的id
@@ -91,28 +91,28 @@ __global__ auto reduce_scalar_kernel(const Scalar *__restrict__ input,
   const auto laneid = threadIdx.x % WARP_SIZE; // 线程在warp内的id
   const auto idx = blockDim.x * bid + tid;     // 线程全局id
 
-  const Sum val = (idx < n) ? static_cast<Sum>(input[idx])
-                            : ZERO<Sum>;     // 读取输入数据，越界则为0
-  const Sum sum = butterfly_reduce_sum(val); // 计算warp内的规约和
+  const Acc val = (idx < n) ? static_cast<Acc>(input[idx])
+                            : ZERO<Acc>;      // 读取输入数据，越界则为0
+  const Acc warp_acc = butterfly_reduce(val); // 计算warp内的规约和
   if (laneid == 0) { // 每个warp的第一个线程将部分和存入共享内存
-    reduce_smem[warpid] = sum;
+    reduce_smem[warpid] = warp_acc;
   }
   __syncthreads(); // 同步所有线程，确保共享内存中的数据可见
   if (warpid == 0) {
-    const Sum warp_sum = (laneid < NUM_WARPS_PER_BLOCK)
+    const Acc warp_acc = (laneid < NUM_WARPS_PER_BLOCK)
                              ? reduce_smem[laneid]
-                             : ZERO<Sum>; // 读取每个warp的部分和
-    const Sum block_sum = butterfly_reduce_sum(warp_sum); // 计算block内的规约和
+                             : ZERO<Acc>;             // 读取每个warp的部分和
+    const Acc block_acc = butterfly_reduce(warp_acc); // 计算block内的规约和
     if (laneid == 0) {
-      atomicAdd(output, block_sum); // 使用原子操作将结果累加到输出
+      atomicAdd(output, block_acc); // 使用原子操作将结果累加到输出
     }
   }
 }
 
-template <typename Scalar, typename Sum = Scalar,
+template <typename Scalar, typename Acc = Scalar,
           const int NUM_ELEM_PER_BLOCK = 256>
 __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
-                                   Sum *__restrict__ output, int n) -> void {
+                                   Acc *__restrict__ output, int n) -> void {
   constexpr auto PACK_SIZE = 128 / 8; // 按128位打包加载, 按字节计
   constexpr auto SCALAR_SIZE = sizeof(Scalar);
   static_assert(SCALAR_SIZE < PACK_SIZE,
@@ -123,7 +123,7 @@ __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
 
   constexpr auto NUM_THREADS_PER_BLOCK =
       NUM_ELEM_PER_BLOCK / NUM_ELEMS_PER_PACK;
-  __shared__ Sum reduce_smem[(NUM_THREADS_PER_BLOCK + WARP_SIZE - 1) /
+  __shared__ Acc reduce_smem[(NUM_THREADS_PER_BLOCK + WARP_SIZE - 1) /
                              WARP_SIZE]; // 用于存储每个warp的部分和
 
   const auto tid = threadIdx.x;                // 线程在block内的id
@@ -134,42 +134,42 @@ __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
                    NUM_ELEMS_PER_PACK; // 线程的打包加载的第一个元素的id
   Scalar pack[NUM_ELEMS_PER_PACK];
   __128_BITS_MUT(pack[0]) = __128_BITS(input[idx]);
-  auto thread_sum = ZERO<Sum>;
+  auto thread_acc = ZERO<Acc>;
 #pragma unroll
   for (auto i = 0; i < NUM_ELEMS_PER_PACK; i++) {
-    const Sum val = (idx + i < n) ? static_cast<Sum>(pack[i])
-                                  : ZERO<Sum>; // 读取输入数据，越界则为0
-    thread_sum = thread_sum + val;
+    const Acc val = (idx + i < n) ? static_cast<Acc>(pack[i])
+                                  : ZERO<Acc>; // 读取输入数据，越界则为0
+    thread_acc = thread_acc + val;
   }
-  const Sum warp_sum = butterfly_reduce_sum(thread_sum); // 计算warp内的规约和
-  if (laneid == 0) { // 每个warp的第一个线程将
-    reduce_smem[warpid] = warp_sum;
+  const Acc warp_acc = butterfly_reduce(thread_acc); // 计算warp内的规约和
+  if (laneid == 0) {                                 // 每个warp的第一个线程将
+    reduce_smem[warpid] = warp_acc;
   }
   __syncthreads(); // 同步所有线程，确保共享内存中的数据
   if (warpid == 0) {
-    const Sum warp_sum =
+    const Acc warp_acc =
         (laneid < (NUM_THREADS_PER_BLOCK + WARP_SIZE - 1) / WARP_SIZE)
             ? reduce_smem[laneid]
-            : ZERO<Sum>; // 读取每个warp的部分和
-    const Sum block_sum = butterfly_reduce_sum(warp_sum); // 计算block内的规约和
+            : ZERO<Acc>;                              // 读取每个warp的部分和
+    const Acc block_acc = butterfly_reduce(warp_acc); // 计算block内的规约和
     if (laneid == 0) {
-      atomicAdd(output, block_sum); // 使用原子操作将结果累加到输出
+      atomicAdd(output, block_acc); // 使用原子操作将结果累加到输出
     }
   }
 }
 
-template <typename Scalar, typename Sum, typename Vector,
+template <typename Scalar, typename Vector, typename Acc = Scalar,
           const int NUM_ELEM_PER_BLOCK = 256>
-  requires IsVectorOf<Vector, Scalar> && ThreadReduceable<Vector, Sum>
+  requires IsVectorOf<Vector, Scalar> && ThreadReduceable<Vector, Acc>
 __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
-                                     Sum *__restrict__ output, int n) -> void {
+                                     Acc *__restrict__ output, int n) -> void {
   static_assert(NUM_ELEM_PER_BLOCK % VectorTraits<Vector>::SIZE == 0,
                 "NUM_ELEM_PER_BLOCK must be multiple of Vector::SIZE");
   constexpr auto NUM_THREADS_PER_BLOCK =
       NUM_ELEM_PER_BLOCK / VectorTraits<Vector>::SIZE;
   constexpr auto NUM_WARPS_PER_BLOCK =
       (NUM_THREADS_PER_BLOCK + WARP_SIZE - 1) / WARP_SIZE;
-  __shared__ Sum reduce_smem[NUM_WARPS_PER_BLOCK];
+  __shared__ Acc reduce_smem[NUM_WARPS_PER_BLOCK];
 
   const auto tid = threadIdx.x;
   const auto bid = blockIdx.x;
@@ -177,20 +177,20 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
   const Vector vec = (idx < n)
                          ? (reinterpret_cast<const Vector *>(&input[idx]))[0]
                          : ZERO<Vector>;
-  const Sum thread_sum = thread_reduce<Vector, Sum>(vec);
+  const Acc thread_acc = thread_reduce<Vector, Acc>(vec);
   const auto warpid = threadIdx.x / WARP_SIZE;
   const auto laneid = threadIdx.x % WARP_SIZE;
-  const Sum warp_sum = butterfly_reduce_sum(thread_sum);
+  const Acc warp_acc = butterfly_reduce(thread_acc);
   if (laneid == 0) {
-    reduce_smem[warpid] = warp_sum;
+    reduce_smem[warpid] = warp_acc;
   }
   __syncthreads();
   if (warpid == 0) {
-    const Sum warp_sum =
-        (laneid < NUM_WARPS_PER_BLOCK) ? reduce_smem[laneid] : ZERO<Sum>;
-    const Sum block_sum = butterfly_reduce_sum(warp_sum);
+    const Acc warp_acc =
+        (laneid < NUM_WARPS_PER_BLOCK) ? reduce_smem[laneid] : ZERO<Acc>;
+    const Acc block_acc = butterfly_reduce(warp_acc);
     if (laneid == 0) {
-      atomicAdd(output, block_sum);
+      atomicAdd(output, block_acc);
     }
   }
 }
@@ -244,41 +244,41 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     }                                                                          \
   } while (0)
 
-#define LAUNCH_REDUCE_VECTOR_KERNEL(NT, grid, scalar_t, acc_t, vec_t, x_ptr,   \
+#define LAUNCH_REDUCE_VECTOR_KERNEL(NT, grid, scalar_t, vec_t, acc_t, x_ptr,   \
                                     y_ptr, n)                                  \
   do {                                                                         \
     constexpr int V = VectorTraits<vec_t>::SIZE;                               \
     dim3 block((NT) / V);                                                      \
-    reduce_vector_kernel<scalar_t, acc_t, vec_t, (NT)>                         \
+    reduce_vector_kernel<scalar_t, vec_t, acc_t, (NT)>                         \
         <<<(grid), block>>>((x_ptr), (y_ptr), (n));                            \
   } while (0)
 
-#define DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, acc_t, vec_t, x_ptr,  \
+#define DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, vec_t, acc_t, x_ptr,  \
                                       y_ptr, n)                                \
   do {                                                                         \
     switch ((K)) {                                                             \
     case 32:                                                                   \
-      LAUNCH_REDUCE_VECTOR_KERNEL(32, grid, scalar_t, acc_t, vec_t, x_ptr,     \
+      LAUNCH_REDUCE_VECTOR_KERNEL(32, grid, scalar_t, vec_t, acc_t, x_ptr,     \
                                   y_ptr, n);                                   \
       break;                                                                   \
     case 64:                                                                   \
-      LAUNCH_REDUCE_VECTOR_KERNEL(64, grid, scalar_t, acc_t, vec_t, x_ptr,     \
+      LAUNCH_REDUCE_VECTOR_KERNEL(64, grid, scalar_t, vec_t, acc_t, x_ptr,     \
                                   y_ptr, n);                                   \
       break;                                                                   \
     case 128:                                                                  \
-      LAUNCH_REDUCE_VECTOR_KERNEL(128, grid, scalar_t, acc_t, vec_t, x_ptr,    \
+      LAUNCH_REDUCE_VECTOR_KERNEL(128, grid, scalar_t, vec_t, acc_t, x_ptr,    \
                                   y_ptr, n);                                   \
       break;                                                                   \
     case 256:                                                                  \
-      LAUNCH_REDUCE_VECTOR_KERNEL(256, grid, scalar_t, acc_t, vec_t, x_ptr,    \
+      LAUNCH_REDUCE_VECTOR_KERNEL(256, grid, scalar_t, vec_t, acc_t, x_ptr,    \
                                   y_ptr, n);                                   \
       break;                                                                   \
     case 512:                                                                  \
-      LAUNCH_REDUCE_VECTOR_KERNEL(512, grid, scalar_t, acc_t, vec_t, x_ptr,    \
+      LAUNCH_REDUCE_VECTOR_KERNEL(512, grid, scalar_t, vec_t, acc_t, x_ptr,    \
                                   y_ptr, n);                                   \
       break;                                                                   \
     case 1024:                                                                 \
-      LAUNCH_REDUCE_VECTOR_KERNEL(1024, grid, scalar_t, acc_t, vec_t, x_ptr,   \
+      LAUNCH_REDUCE_VECTOR_KERNEL(1024, grid, scalar_t, vec_t, acc_t, x_ptr,   \
                                   y_ptr, n);                                   \
       break;                                                                   \
     default:                                                                   \
@@ -362,7 +362,7 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
   }
 
 #define TORCH_BINDING_REDUCE_VECTOR(vec_tag, acc_tag, th_type, scalar_t,       \
-                                    acc_t, vec_t)                              \
+                                    vec_t, acc_t)                              \
   torch::Tensor reduce_vector_sum_##vec_tag##_##acc_tag(torch::Tensor x) {     \
     static_assert(IsVectorOf<vec_t, scalar_t>,                                 \
                   "IsVectorOf failed for " STRINGFY(vec_tag));                 \
@@ -386,7 +386,7 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
         dim3 grid(S);                                                          \
         auto x_ptr = reinterpret_cast<const scalar_t *>(x_contig.data_ptr());  \
         auto y_ptr = reinterpret_cast<acc_t *>(y.data_ptr());                  \
-        DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, acc_t, vec_t, x_ptr,  \
+        DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, vec_t, acc_t, x_ptr,  \
                                       y_ptr, n);                               \
         return y;                                                              \
       }                                                                        \
@@ -442,9 +442,9 @@ TORCH_BINDING_REDUCE_SCALAR(f16, f32, torch::kHalf, f16, f32)
 TORCH_BINDING_REDUCE_SCALAR(bf16, f32, torch::kBFloat16, b16, f32)
 
 // vec_tag, acc_tag, th_type, scalar_t, acc_t, vec_t
-TORCH_BINDING_REDUCE_VECTOR(f32x4, f32, torch::kFloat32, f32, f32, f32x4)
-TORCH_BINDING_REDUCE_VECTOR(f16x2, f32, torch::kHalf, f16, f32, f16x2)
-TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, b16, f32, b16x2)
+TORCH_BINDING_REDUCE_VECTOR(f32x4, f32, torch::kFloat32, f32, f32x4, f32)
+TORCH_BINDING_REDUCE_VECTOR(f16x2, f32, torch::kHalf, f16, f16x2, f32)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, b16, b16x2, f32)
 
 // scalar_tag, acc_tag, th_type, scalar_t, acc_t
 TORCH_BINDING_REDUCE_PACK(f32, f32, torch::kFloat32, f32, f32)
