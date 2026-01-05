@@ -221,5 +221,28 @@ concept IsVectorOf = requires {
   requires std::is_same_v<typename VectorTraits<Vector>::Scalar, Scalar>;
 };
 
+static_assert(IsVectorOf<f8e4m3x4, f8e4m3>);
+static_assert(IsVectorOf<f8e4m3x2, f8e4m3>);
+static_assert(IsVectorOf<f8e5m2x4, f8e5m2>);
+static_assert(IsVectorOf<f8e5m2x2, f8e5m2>);
 static_assert(IsVectorOf<f32x4, f32>);
+static_assert(IsVectorOf<f32x2, f32>);
+static_assert(IsVectorOf<f16x2, f16>);
+static_assert(IsVectorOf<b16x2, b16>);
+static_assert(IsVectorOf<f64x2, f64>);
+static_assert(IsVectorOf<i8x4, i8>);
 static_assert(IsVectorOf<i8x2, i8>);
+static_assert(IsVectorOf<u8x4, u8>);
+static_assert(IsVectorOf<u8x2, u8>);
+static_assert(IsVectorOf<i16x4, i16>);
+static_assert(IsVectorOf<i16x2, i16>);
+static_assert(IsVectorOf<u16x4, u16>);
+static_assert(IsVectorOf<u16x2, u16>);
+static_assert(IsVectorOf<i32x4, i32>);
+static_assert(IsVectorOf<i32x2, i32>);
+static_assert(IsVectorOf<u32x4, u32>);
+static_assert(IsVectorOf<u32x2, u32>);
+static_assert(IsVectorOf<i64x4, i64>);
+static_assert(IsVectorOf<i64x2, i64>);
+static_assert(IsVectorOf<u64x4, u64>);
+static_assert(IsVectorOf<u64x2, u64>);

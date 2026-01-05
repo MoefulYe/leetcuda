@@ -1,11 +1,21 @@
 CompileFlags:
+    CompilationDatabase: build
     Remove:
+        - "-gencode"
+        - "arch=compute_86,code=sm_86"
+        - "arch=compute_86,code=compute_86"
         - "--generate-code=arch=compute_86,code=[compute_86,sm_86]"
+        - "-Xcudafe"
+        - "--diag_suppress=cc_clobber_ignored,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl"
         - "-forward-unknown-to-host-compiler"
         - "-Xcompiler=-fPIC"
         - "-Xcompiler=-fvisibility=hidden"
+        - "--expt-relaxed-constexpr"
+        - "--expt-extended-lambda"
+        - "--use_fast_math"
     Add:
         - "-std=c++20"
+        - "--cuda-host-only"
         - "--cuda-gpu-arch=sm_86"
         - "--cuda-path=/nix/store/h049g14b6jpssivi6hv9ibwp0wk7f2fi-cuda-merged-12.8"
         - "-isystem"
