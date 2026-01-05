@@ -396,8 +396,6 @@ static_assert(IsVectorOf<i64x2, i64>);
 static_assert(IsVectorOf<u64x4, u64>);
 static_assert(IsVectorOf<u64x2, u64>);
 
-template <typename ScalarType> struct CudaToTorchType {};
-
 template <typename ScalarType>
 constexpr auto cuda_to_torch_type() -> torch::ScalarType = delete;
 
