@@ -1,13 +1,30 @@
 //
 
+// Clang (including clangd) in CUDA mode pulls in CUDA headers via
+// `__clang_cuda_runtime_wrapper.h`, which defines `__noinline__` as a macro.
+// That macro breaks libstdc++ which uses `__attribute__((__noinline__, ...))`.
+// Undefine it for clang-only parsing before including any libstdc++ headers.
+#if defined(__clang__)
+#ifdef __noinline__
+#undef __noinline__
+#endif
+#endif
+
 #include <cassert>
-#include <common.hpp>
 #include <concepts>
-#include <cuda_fp16.h>
 #include <sys/stat.h>
 #include <torch/extension.h>
 #include <torch/types.h>
-#include <vector_types.h>
+
+#if defined(__clang__)
+#ifdef __noinline__
+#undef __noinline__
+#endif
+#endif
+
+#include <common.hpp>
+#include <cuda_fp16.h>
+#include <cuda_runtime.h>
 
 constexpr auto WARP_SIZE = 32;
 
@@ -74,8 +91,9 @@ __global__ auto reduce_scalar_kernel(const Scalar *__restrict__ input,
   const auto laneid = threadIdx.x % WARP_SIZE; // 线程在warp内的id
   const auto idx = blockDim.x * bid + tid;     // 线程全局id
 
-  const Sum val = (idx < n) ? input[idx] : ZERO<Sum>; // 读取输入数据，越界则为0
-  const Sum sum = butterfly_reduce_sum(val);          // 计算warp内的规约和
+  const Sum val = (idx < n) ? static_cast<Sum>(input[idx])
+                            : ZERO<Sum>;     // 读取输入数据，越界则为0
+  const Sum sum = butterfly_reduce_sum(val); // 计算warp内的规约和
   if (laneid == 0) { // 每个warp的第一个线程将部分和存入共享内存
     reduce_smem[warpid] = sum;
   }
@@ -140,7 +158,7 @@ __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
   }
 }
 
-template <typename Scalar, typename Sum = Scalar, typename Vector,
+template <typename Scalar, typename Sum, typename Vector,
           const int NUM_ELEM_PER_BLOCK = 256>
   requires IsVectorOf<Vector, Scalar> && ThreadReduceable<Vector, Sum>
 __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
@@ -153,8 +171,6 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
       (NUM_THREADS_PER_BLOCK + WARP_SIZE - 1) / WARP_SIZE;
   __shared__ Sum reduce_smem[NUM_WARPS_PER_BLOCK];
 
-  // assert(NUM_THREADS_PER_BLOCK == blockDim.x);
-  // assert(blockDim.x <= KWARP_SIZE * KWARP_SIZE);
   const auto tid = threadIdx.x;
   const auto bid = blockIdx.x;
   const auto idx = (blockDim.x * bid + tid) * VectorTraits<Vector>::SIZE;
@@ -177,4 +193,274 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
       atomicAdd(output, block_sum);
     }
   }
+}
+
+#define STRINGFY(str) #str
+#define TORCH_BINDING_COMMON_EXTENSION(func)                                   \
+  m.def(STRINGFY(func), &func, STRINGFY(func));
+
+#define CHECK_TORCH_TENSOR_DTYPE(T, th_type)                                   \
+  TORCH_CHECK(((T).options().dtype() == (th_type)), "values must "             \
+                                                    "be " #th_type)
+
+#define CHECK_CUDA(T) TORCH_CHECK((T).is_cuda(), "tensor must be a CUDA tensor")
+
+#define LAUNCH_REDUCE_SCALAR_KERNEL(NT, grid, scalar_t, acc_t, x_ptr, y_ptr,   \
+                                    n)                                         \
+  do {                                                                         \
+    dim3 block((NT));                                                          \
+    reduce_scalar_kernel<scalar_t, acc_t, (NT)>                                \
+        <<<(grid), block>>>((x_ptr), (y_ptr), (n));                            \
+  } while (0)
+
+#define DISPATCH_REDUCE_SCALAR_KERNEL(K, grid, scalar_t, acc_t, x_ptr, y_ptr,  \
+                                      n)                                       \
+  do {                                                                         \
+    switch ((K)) {                                                             \
+    case 32:                                                                   \
+      LAUNCH_REDUCE_SCALAR_KERNEL(32, grid, scalar_t, acc_t, x_ptr, y_ptr, n); \
+      break;                                                                   \
+    case 64:                                                                   \
+      LAUNCH_REDUCE_SCALAR_KERNEL(64, grid, scalar_t, acc_t, x_ptr, y_ptr, n); \
+      break;                                                                   \
+    case 128:                                                                  \
+      LAUNCH_REDUCE_SCALAR_KERNEL(128, grid, scalar_t, acc_t, x_ptr, y_ptr,    \
+                                  n);                                          \
+      break;                                                                   \
+    case 256:                                                                  \
+      LAUNCH_REDUCE_SCALAR_KERNEL(256, grid, scalar_t, acc_t, x_ptr, y_ptr,    \
+                                  n);                                          \
+      break;                                                                   \
+    case 512:                                                                  \
+      LAUNCH_REDUCE_SCALAR_KERNEL(512, grid, scalar_t, acc_t, x_ptr, y_ptr,    \
+                                  n);                                          \
+      break;                                                                   \
+    case 1024:                                                                 \
+      LAUNCH_REDUCE_SCALAR_KERNEL(1024, grid, scalar_t, acc_t, x_ptr, y_ptr,   \
+                                  n);                                          \
+      break;                                                                   \
+    default:                                                                   \
+      throw std::runtime_error("only support K: 32/64/128/256/512/1024");      \
+    }                                                                          \
+  } while (0)
+
+#define LAUNCH_REDUCE_VECTOR_KERNEL(NT, grid, scalar_t, acc_t, vec_t, x_ptr,   \
+                                    y_ptr, n)                                  \
+  do {                                                                         \
+    constexpr int V = VectorTraits<vec_t>::SIZE;                               \
+    dim3 block((NT) / V);                                                      \
+    reduce_vector_kernel<scalar_t, acc_t, vec_t, (NT)>                         \
+        <<<(grid), block>>>((x_ptr), (y_ptr), (n));                            \
+  } while (0)
+
+#define DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, acc_t, vec_t, x_ptr,  \
+                                      y_ptr, n)                                \
+  do {                                                                         \
+    switch ((K)) {                                                             \
+    case 32:                                                                   \
+      LAUNCH_REDUCE_VECTOR_KERNEL(32, grid, scalar_t, acc_t, vec_t, x_ptr,     \
+                                  y_ptr, n);                                   \
+      break;                                                                   \
+    case 64:                                                                   \
+      LAUNCH_REDUCE_VECTOR_KERNEL(64, grid, scalar_t, acc_t, vec_t, x_ptr,     \
+                                  y_ptr, n);                                   \
+      break;                                                                   \
+    case 128:                                                                  \
+      LAUNCH_REDUCE_VECTOR_KERNEL(128, grid, scalar_t, acc_t, vec_t, x_ptr,    \
+                                  y_ptr, n);                                   \
+      break;                                                                   \
+    case 256:                                                                  \
+      LAUNCH_REDUCE_VECTOR_KERNEL(256, grid, scalar_t, acc_t, vec_t, x_ptr,    \
+                                  y_ptr, n);                                   \
+      break;                                                                   \
+    case 512:                                                                  \
+      LAUNCH_REDUCE_VECTOR_KERNEL(512, grid, scalar_t, acc_t, vec_t, x_ptr,    \
+                                  y_ptr, n);                                   \
+      break;                                                                   \
+    case 1024:                                                                 \
+      LAUNCH_REDUCE_VECTOR_KERNEL(1024, grid, scalar_t, acc_t, vec_t, x_ptr,   \
+                                  y_ptr, n);                                   \
+      break;                                                                   \
+    default:                                                                   \
+      throw std::runtime_error("only support K: 32/64/128/256/512/1024");      \
+    }                                                                          \
+  } while (0)
+
+#define LAUNCH_REDUCE_PACK_KERNEL(NT, grid, scalar_t, acc_t, pack_elems,       \
+                                  x_ptr, y_ptr, n)                             \
+  do {                                                                         \
+    dim3 block((NT) / (pack_elems));                                           \
+    reduce_pack_kernel<scalar_t, acc_t, (NT)>                                  \
+        <<<(grid), block>>>((x_ptr), (y_ptr), (n));                            \
+  } while (0)
+
+#define DISPATCH_REDUCE_PACK_KERNEL(K, grid, scalar_t, acc_t, pack_elems,      \
+                                    x_ptr, y_ptr, n)                           \
+  do {                                                                         \
+    switch ((K)) {                                                             \
+    case 32:                                                                   \
+      LAUNCH_REDUCE_PACK_KERNEL(32, grid, scalar_t, acc_t, pack_elems, x_ptr,  \
+                                y_ptr, n);                                     \
+      break;                                                                   \
+    case 64:                                                                   \
+      LAUNCH_REDUCE_PACK_KERNEL(64, grid, scalar_t, acc_t, pack_elems, x_ptr,  \
+                                y_ptr, n);                                     \
+      break;                                                                   \
+    case 128:                                                                  \
+      LAUNCH_REDUCE_PACK_KERNEL(128, grid, scalar_t, acc_t, pack_elems, x_ptr, \
+                                y_ptr, n);                                     \
+      break;                                                                   \
+    case 256:                                                                  \
+      LAUNCH_REDUCE_PACK_KERNEL(256, grid, scalar_t, acc_t, pack_elems, x_ptr, \
+                                y_ptr, n);                                     \
+      break;                                                                   \
+    case 512:                                                                  \
+      LAUNCH_REDUCE_PACK_KERNEL(512, grid, scalar_t, acc_t, pack_elems, x_ptr, \
+                                y_ptr, n);                                     \
+      break;                                                                   \
+    case 1024:                                                                 \
+      LAUNCH_REDUCE_PACK_KERNEL(1024, grid, scalar_t, acc_t, pack_elems,       \
+                                x_ptr, y_ptr, n);                              \
+      break;                                                                   \
+    default:                                                                   \
+      throw std::runtime_error("only support K: 32/64/128/256/512/1024");      \
+    }                                                                          \
+  } while (0)
+
+#define TORCH_BINDING_REDUCE_SCALAR(scalar_tag, acc_tag, th_type, scalar_t,    \
+                                    acc_t)                                     \
+  torch::Tensor reduce_scalar_sum_##scalar_tag##_##acc_tag(torch::Tensor x) {  \
+    CHECK_CUDA(x)                                                              \
+    CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
+    auto x_contig = x.contiguous();                                            \
+    auto y = torch::zeros({1}, x_contig.options().dtype(torch::kFloat32));     \
+    const int64_t n64 = x_contig.numel();                                      \
+    const int n = static_cast<int>(n64);                                       \
+    if (n <= 0) {                                                              \
+      return y;                                                                \
+    }                                                                          \
+    const int ndim = x_contig.dim();                                           \
+    if (ndim == 2) {                                                           \
+      const int S = static_cast<int>(x_contig.size(0));                        \
+      const int K = static_cast<int>(x_contig.size(1));                        \
+      if (K <= 1024) {                                                         \
+        dim3 grid(S);                                                          \
+        auto x_ptr = reinterpret_cast<const scalar_t *>(x_contig.data_ptr());  \
+        auto y_ptr = reinterpret_cast<acc_t *>(y.data_ptr());                  \
+        DISPATCH_REDUCE_SCALAR_KERNEL(K, grid, scalar_t, acc_t, x_ptr, y_ptr,  \
+                                      n);                                      \
+        return y;                                                              \
+      }                                                                        \
+    }                                                                          \
+    constexpr int EPB = 1024;                                                  \
+    dim3 block(EPB);                                                           \
+    dim3 grid((n + EPB - 1) / EPB);                                            \
+    reduce_scalar_kernel<scalar_t, acc_t, EPB><<<grid, block>>>(               \
+        reinterpret_cast<const scalar_t *>(x_contig.data_ptr()),               \
+        reinterpret_cast<acc_t *>(y.data_ptr()), n);                           \
+    return y;                                                                  \
+  }
+
+#define TORCH_BINDING_REDUCE_VECTOR(vec_tag, acc_tag, th_type, scalar_t,       \
+                                    acc_t, vec_t)                              \
+  torch::Tensor reduce_vector_sum_##vec_tag##_##acc_tag(torch::Tensor x) {     \
+    static_assert(IsVectorOf<vec_t, scalar_t>,                                 \
+                  "IsVectorOf failed for " STRINGFY(vec_tag));                 \
+    static_assert(ThreadReduceable<vec_t, acc_t>,                              \
+                  "ThreadReduceable failed for " STRINGFY(vec_tag));           \
+    CHECK_CUDA(x)                                                              \
+    CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
+    auto x_contig = x.contiguous();                                            \
+    auto y = torch::zeros({1}, x_contig.options().dtype(torch::kFloat32));     \
+    const int64_t n64 = x_contig.numel();                                      \
+    const int n = static_cast<int>(n64);                                       \
+    if (n <= 0) {                                                              \
+      return y;                                                                \
+    }                                                                          \
+    const int ndim = x_contig.dim();                                           \
+    if (ndim == 2) {                                                           \
+      const int S = static_cast<int>(x_contig.size(0));                        \
+      const int K = static_cast<int>(x_contig.size(1));                        \
+      constexpr int V = VectorTraits<vec_t>::SIZE;                             \
+      if (K <= 1024 && (K % V) == 0) {                                         \
+        dim3 grid(S);                                                          \
+        auto x_ptr = reinterpret_cast<const scalar_t *>(x_contig.data_ptr());  \
+        auto y_ptr = reinterpret_cast<acc_t *>(y.data_ptr());                  \
+        DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, acc_t, vec_t, x_ptr,  \
+                                      y_ptr, n);                               \
+        return y;                                                              \
+      }                                                                        \
+    }                                                                          \
+    constexpr int EPB = 1024;                                                  \
+    dim3 block(EPB);                                                           \
+    dim3 grid((n + EPB - 1) / EPB);                                            \
+    reduce_scalar_kernel<scalar_t, acc_t, EPB><<<grid, block>>>(               \
+        reinterpret_cast<const scalar_t *>(x_contig.data_ptr()),               \
+        reinterpret_cast<acc_t *>(y.data_ptr()), n);                           \
+    return y;                                                                  \
+  }
+
+#define TORCH_BINDING_REDUCE_PACK(scalar_tag, acc_tag, th_type, scalar_t,      \
+                                  acc_t)                                       \
+  torch::Tensor reduce_pack_sum_##scalar_tag##_##acc_tag(torch::Tensor x) {    \
+    CHECK_CUDA(x)                                                              \
+    CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
+    auto x_contig = x.contiguous();                                            \
+    auto y = torch::zeros({1}, x_contig.options().dtype(torch::kFloat32));     \
+    const int64_t n64 = x_contig.numel();                                      \
+    const int n = static_cast<int>(n64);                                       \
+    if (n <= 0) {                                                              \
+      return y;                                                                \
+    }                                                                          \
+    const int ndim = x_contig.dim();                                           \
+    constexpr int PACK_ELEMS = 16 / static_cast<int>(sizeof(scalar_t));        \
+    static_assert(PACK_ELEMS > 0, "PACK_ELEMS must be positive");              \
+    if (ndim == 2) {                                                           \
+      const int S = static_cast<int>(x_contig.size(0));                        \
+      const int K = static_cast<int>(x_contig.size(1));                        \
+      if (K <= 1024 && (K % PACK_ELEMS) == 0) {                                \
+        dim3 grid(S);                                                          \
+        auto x_ptr = reinterpret_cast<const scalar_t *>(x_contig.data_ptr());  \
+        auto y_ptr = reinterpret_cast<acc_t *>(y.data_ptr());                  \
+        DISPATCH_REDUCE_PACK_KERNEL(K, grid, scalar_t, acc_t, PACK_ELEMS,      \
+                                    x_ptr, y_ptr, n);                          \
+        return y;                                                              \
+      }                                                                        \
+    }                                                                          \
+    constexpr int EPB = 1024;                                                  \
+    dim3 block(EPB);                                                           \
+    dim3 grid((n + EPB - 1) / EPB);                                            \
+    reduce_scalar_kernel<scalar_t, acc_t, EPB><<<grid, block>>>(               \
+        reinterpret_cast<const scalar_t *>(x_contig.data_ptr()),               \
+        reinterpret_cast<acc_t *>(y.data_ptr()), n);                           \
+    return y;                                                                  \
+  }
+
+// scalar_tag, acc_tag, th_type, scalar_t, acc_t
+TORCH_BINDING_REDUCE_SCALAR(f32, f32, torch::kFloat32, f32, f32)
+TORCH_BINDING_REDUCE_SCALAR(f16, f32, torch::kHalf, f16, f32)
+TORCH_BINDING_REDUCE_SCALAR(bf16, f32, torch::kBFloat16, b16, f32)
+
+// vec_tag, acc_tag, th_type, scalar_t, acc_t, vec_t
+TORCH_BINDING_REDUCE_VECTOR(f32x4, f32, torch::kFloat32, f32, f32, f32x4)
+TORCH_BINDING_REDUCE_VECTOR(f16x2, f32, torch::kHalf, f16, f32, f16x2)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, b16, f32, b16x2)
+
+// scalar_tag, acc_tag, th_type, scalar_t, acc_t
+TORCH_BINDING_REDUCE_PACK(f32, f32, torch::kFloat32, f32, f32)
+TORCH_BINDING_REDUCE_PACK(f16, f32, torch::kHalf, f16, f32)
+TORCH_BINDING_REDUCE_PACK(bf16, f32, torch::kBFloat16, b16, f32)
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f32_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f16_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_bf16_f32)
+
+  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f32x4_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f16x2_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_bf16x2_f32)
+
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f32_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f16_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_bf16_f32)
 }
