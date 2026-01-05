@@ -199,9 +199,9 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
 #define TORCH_BINDING_COMMON_EXTENSION(func)                                   \
   m.def(STRINGFY(func), &func, STRINGFY(func));
 
-#define CHECK_TORCH_TENSOR_DTYPE(T, th_type)                                   \
-  TORCH_CHECK(((T).options().dtype() == (th_type)), "values must "             \
-                                                    "be " #th_type)
+#define CHECK_TORCH_TENSOR_DTYPE(tensor, Cuda)                                 \
+  TORCH_CHECK(((tensor).scalar_type() == cuda_to_torch_type<Cuda>()),          \
+              "values must be ", STRINGFY(Cuda))
 
 #define CHECK_CUDA(T) TORCH_CHECK((T).is_cuda(), "tensor must be a CUDA tensor")
 
@@ -327,14 +327,13 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     }                                                                          \
   } while (0)
 
-#define TORCH_BINDING_REDUCE_SCALAR(scalar_tag, acc_tag, th_type, scalar_t,    \
-                                    acc_t)                                     \
-  torch::Tensor reduce_scalar_sum_##scalar_tag##_##acc_tag(torch::Tensor x) {  \
+#define TORCH_BINDING_REDUCE_SCALAR(tag, Scalar, Acc)                          \
+  torch::Tensor reduce_scalar_sum_##tag(torch::Tensor x) {                     \
     CHECK_CUDA(x)                                                              \
-    CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
+    CHECK_TORCH_TENSOR_DTYPE(x, Scalar)                                        \
     auto x_contig = x.contiguous();                                            \
     auto y = torch::zeros(                                                     \
-        {1}, x_contig.options().dtype(cuda_to_torch_type<acc_t>()));           \
+        {1}, x_contig.options().dtype(cuda_to_torch_type<Acc>()));             \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \
@@ -346,9 +345,47 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
       const int K = static_cast<int>(x_contig.size(1));                        \
       if (K <= 1024) {                                                         \
         dim3 grid(S);                                                          \
-        auto x_ptr = reinterpret_cast<const scalar_t *>(x_contig.data_ptr());  \
-        auto y_ptr = reinterpret_cast<acc_t *>(y.data_ptr());                  \
-        DISPATCH_REDUCE_SCALAR_KERNEL(K, grid, scalar_t, acc_t, x_ptr, y_ptr,  \
+        auto x_ptr = reinterpret_cast<const Scalar *>(x_contig.data_ptr());    \
+        auto y_ptr = reinterpret_cast<Acc *>(y.data_ptr());                    \
+        DISPATCH_REDUCE_SCALAR_KERNEL(K, grid, Scalar, Acc, x_ptr, y_ptr, n);  \
+        return y;                                                              \
+      }                                                                        \
+    }                                                                          \
+    constexpr int EPB = 1024;                                                  \
+    dim3 block(EPB);                                                           \
+    dim3 grid((n + EPB - 1) / EPB);                                            \
+    reduce_scalar_kernel<Scalar, Acc, EPB><<<grid, block>>>(                   \
+        reinterpret_cast<const Scalar *>(x_contig.data_ptr()),                 \
+        reinterpret_cast<Acc *>(y.data_ptr()), n);                             \
+    return y;                                                                  \
+  }
+
+#define TORCH_BINDING_REDUCE_VECTOR(tag, Scalar, Vec, Acc)                     \
+  torch::Tensor reduce_vector_sum_##tag(torch::Tensor x) {                     \
+    static_assert(IsVectorOf<Vec, Scalar>,                                     \
+                  "IsVectorOf failed for " STRINGFY(Vec));                     \
+    static_assert(ThreadReduceable<Vec, Acc>,                                  \
+                  "ThreadReduceable failed for " STRINGFY(Vec));               \
+    CHECK_CUDA(x)                                                              \
+    CHECK_TORCH_TENSOR_DTYPE(x, Scalar)                                        \
+    auto x_contig = x.contiguous();                                            \
+    auto y = torch::zeros(                                                     \
+        {1}, x_contig.options().dtype(cuda_to_torch_type<Acc>()));             \
+    const int64_t n64 = x_contig.numel();                                      \
+    const int n = static_cast<int>(n64);                                       \
+    if (n <= 0) {                                                              \
+      return y;                                                                \
+    }                                                                          \
+    const int ndim = x_contig.dim();                                           \
+    if (ndim == 2) {                                                           \
+      const int S = static_cast<int>(x_contig.size(0));                        \
+      const int K = static_cast<int>(x_contig.size(1));                        \
+      constexpr int V = VectorTraits<Vec>::SIZE;                               \
+      if (K <= 1024 && (K % V) == 0) {                                         \
+        dim3 grid(S);                                                          \
+        auto x_ptr = reinterpret_cast<const Scalar *>(x_contig.data_ptr());    \
+        auto y_ptr = reinterpret_cast<Acc *>(y.data_ptr());                    \
+        DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, Scalar, Vec, Acc, x_ptr, y_ptr, \
                                       n);                                      \
         return y;                                                              \
       }                                                                        \
@@ -356,120 +393,79 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     constexpr int EPB = 1024;                                                  \
     dim3 block(EPB);                                                           \
     dim3 grid((n + EPB - 1) / EPB);                                            \
-    reduce_scalar_kernel<scalar_t, acc_t, EPB><<<grid, block>>>(               \
-        reinterpret_cast<const scalar_t *>(x_contig.data_ptr()),               \
-        reinterpret_cast<acc_t *>(y.data_ptr()), n);                           \
+    reduce_scalar_kernel<Scalar, Acc, EPB><<<grid, block>>>(                   \
+        reinterpret_cast<const Scalar *>(x_contig.data_ptr()),                 \
+        reinterpret_cast<Acc *>(y.data_ptr()), n);                             \
     return y;                                                                  \
   }
 
-#define TORCH_BINDING_REDUCE_VECTOR(vec_tag, acc_tag, th_type, scalar_t,       \
-                                    vec_t, acc_t)                              \
-  torch::Tensor reduce_vector_sum_##vec_tag##_##acc_tag(torch::Tensor x) {     \
-    static_assert(IsVectorOf<vec_t, scalar_t>,                                 \
-                  "IsVectorOf failed for " STRINGFY(vec_tag));                 \
-    static_assert(ThreadReduceable<vec_t, acc_t>,                              \
-                  "ThreadReduceable failed for " STRINGFY(vec_tag));           \
+#define TORCH_BINDING_REDUCE_PACK(tag, Scalar, Acc)                            \
+  torch::Tensor reduce_pack_sum_##tag(torch::Tensor x) {                       \
     CHECK_CUDA(x)                                                              \
-    CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
+    CHECK_TORCH_TENSOR_DTYPE(x, Scalar)                                        \
     auto x_contig = x.contiguous();                                            \
     auto y = torch::zeros(                                                     \
-        {1}, x_contig.options().dtype(cuda_to_torch_type<acc_t>()));           \
+        {1}, x_contig.options().dtype(cuda_to_torch_type<Acc>()));             \
     const int64_t n64 = x_contig.numel();                                      \
     const int n = static_cast<int>(n64);                                       \
     if (n <= 0) {                                                              \
       return y;                                                                \
     }                                                                          \
     const int ndim = x_contig.dim();                                           \
-    if (ndim == 2) {                                                           \
-      const int S = static_cast<int>(x_contig.size(0));                        \
-      const int K = static_cast<int>(x_contig.size(1));                        \
-      constexpr int V = VectorTraits<vec_t>::SIZE;                             \
-      if (K <= 1024 && (K % V) == 0) {                                         \
-        dim3 grid(S);                                                          \
-        auto x_ptr = reinterpret_cast<const scalar_t *>(x_contig.data_ptr());  \
-        auto y_ptr = reinterpret_cast<acc_t *>(y.data_ptr());                  \
-        DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, vec_t, acc_t, x_ptr,  \
-                                      y_ptr, n);                               \
-        return y;                                                              \
-      }                                                                        \
-    }                                                                          \
-    constexpr int EPB = 1024;                                                  \
-    dim3 block(EPB);                                                           \
-    dim3 grid((n + EPB - 1) / EPB);                                            \
-    reduce_scalar_kernel<scalar_t, acc_t, EPB><<<grid, block>>>(               \
-        reinterpret_cast<const scalar_t *>(x_contig.data_ptr()),               \
-        reinterpret_cast<acc_t *>(y.data_ptr()), n);                           \
-    return y;                                                                  \
-  }
-
-#define TORCH_BINDING_REDUCE_PACK(scalar_tag, acc_tag, th_type, scalar_t,      \
-                                  acc_t)                                       \
-  torch::Tensor reduce_pack_sum_##scalar_tag##_##acc_tag(torch::Tensor x) {    \
-    CHECK_CUDA(x)                                                              \
-    CHECK_TORCH_TENSOR_DTYPE(x, (th_type))                                     \
-    auto x_contig = x.contiguous();                                            \
-    auto y = torch::zeros(                                                     \
-        {1}, x_contig.options().dtype(cuda_to_torch_type<acc_t>()));           \
-    const int64_t n64 = x_contig.numel();                                      \
-    const int n = static_cast<int>(n64);                                       \
-    if (n <= 0) {                                                              \
-      return y;                                                                \
-    }                                                                          \
-    const int ndim = x_contig.dim();                                           \
-    constexpr int PACK_ELEMS = 16 / static_cast<int>(sizeof(scalar_t));        \
+    constexpr int PACK_ELEMS = 16 / static_cast<int>(sizeof(Scalar));          \
     static_assert(PACK_ELEMS > 0, "PACK_ELEMS must be positive");              \
     if (ndim == 2) {                                                           \
       const int S = static_cast<int>(x_contig.size(0));                        \
       const int K = static_cast<int>(x_contig.size(1));                        \
       if (K <= 1024 && (K % PACK_ELEMS) == 0) {                                \
         dim3 grid(S);                                                          \
-        auto x_ptr = reinterpret_cast<const scalar_t *>(x_contig.data_ptr());  \
-        auto y_ptr = reinterpret_cast<acc_t *>(y.data_ptr());                  \
-        DISPATCH_REDUCE_PACK_KERNEL(K, grid, scalar_t, acc_t, PACK_ELEMS,      \
-                                    x_ptr, y_ptr, n);                          \
+        auto x_ptr = reinterpret_cast<const Scalar *>(x_contig.data_ptr());    \
+        auto y_ptr = reinterpret_cast<Acc *>(y.data_ptr());                    \
+        DISPATCH_REDUCE_PACK_KERNEL(K, grid, Scalar, Acc, PACK_ELEMS, x_ptr,   \
+                                    y_ptr, n);                                 \
         return y;                                                              \
       }                                                                        \
     }                                                                          \
     constexpr int EPB = 1024;                                                  \
     dim3 block(EPB);                                                           \
     dim3 grid((n + EPB - 1) / EPB);                                            \
-    reduce_scalar_kernel<scalar_t, acc_t, EPB><<<grid, block>>>(               \
-        reinterpret_cast<const scalar_t *>(x_contig.data_ptr()),               \
-        reinterpret_cast<acc_t *>(y.data_ptr()), n);                           \
+    reduce_scalar_kernel<Scalar, Acc, EPB><<<grid, block>>>(                   \
+        reinterpret_cast<const Scalar *>(x_contig.data_ptr()),                 \
+        reinterpret_cast<Acc *>(y.data_ptr()), n);                             \
     return y;                                                                  \
   }
 
 // f32
-TORCH_BINDING_REDUCE_SCALAR(f32, f32, torch::kFloat32, f32, f32)
-TORCH_BINDING_REDUCE_VECTOR(f32x4, f32, torch::kFloat32, f32, f32x4, f32)
+TORCH_BINDING_REDUCE_SCALAR(f32_f32, f32, f32)
+TORCH_BINDING_REDUCE_VECTOR(f32x4_f32, f32, f32x4, f32)
 
 // f16
-TORCH_BINDING_REDUCE_SCALAR(f16, f16, torch::kHalf, f16, f16)
-TORCH_BINDING_REDUCE_SCALAR(f16, f32, torch::kHalf, f16, f32)
-TORCH_BINDING_REDUCE_VECTOR(f16x2, f16, torch::kHalf, f16, f16x2, f16)
-TORCH_BINDING_REDUCE_VECTOR(f16x2, f32, torch::kHalf, f16, f16x2, f32)
-TORCH_BINDING_REDUCE_PACK(f16, f16, torch::kHalf, f16, f16)
-TORCH_BINDING_REDUCE_PACK(f16, f32, torch::kHalf, f16, f32)
+TORCH_BINDING_REDUCE_SCALAR(f16_f16, f16, f16)
+TORCH_BINDING_REDUCE_SCALAR(f16_f32, f16, f32)
+TORCH_BINDING_REDUCE_VECTOR(f16x2_f16, f16, f16x2, f16)
+TORCH_BINDING_REDUCE_VECTOR(f16x2_f32, f16, f16x2, f32)
+TORCH_BINDING_REDUCE_PACK(f16x8_f16, f16, f16)
+TORCH_BINDING_REDUCE_PACK(f16x8_f32, f16, f32)
 
 // bf16
-TORCH_BINDING_REDUCE_SCALAR(bf16, bf16, torch::kBFloat16, bf16, bf16)
-TORCH_BINDING_REDUCE_SCALAR(bf16, f32, torch::kBFloat16, bf16, f32)
-TORCH_BINDING_REDUCE_VECTOR(bf16x2, bf16, torch::kBFloat16, bf16, bf16x2, bf16)
-TORCH_BINDING_REDUCE_VECTOR(bf16x2, f32, torch::kBFloat16, bf16, bf16x2, f32)
-TORCH_BINDING_REDUCE_PACK(bf16, bf16, torch::kBFloat16, bf16, bf16)
-TORCH_BINDING_REDUCE_PACK(bf16, f32, torch::kBFloat16, bf16, f32)
+TORCH_BINDING_REDUCE_SCALAR(bf16_bf16, bf16, bf16)
+TORCH_BINDING_REDUCE_SCALAR(bf16_f32, bf16, f32)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2_bf16, bf16, bf16x2, bf16)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2_f32, bf16, bf16x2, f32)
+TORCH_BINDING_REDUCE_PACK(bf16x8_bf16, bf16, bf16)
+TORCH_BINDING_REDUCE_PACK(bf16x8_f32, bf16, f32)
 
 // f8e4m3
-TORCH_BINDING_REDUCE_SCALAR(f8e4m3, f16, torch::kFloat8_e4m3fn, f8e4m3, f16)
-TORCH_BINDING_REDUCE_PACK(f8e4m3, f16, torch::kFloat8_e4m3fn, f8e4m3, f16)
+TORCH_BINDING_REDUCE_SCALAR(f8e4m3_f16, f8e4m3, f16)
+TORCH_BINDING_REDUCE_PACK(f8e4m3x16_f16, f8e4m3, f16)
 
 // f8e5m2
-TORCH_BINDING_REDUCE_SCALAR(f8e5m2, f16, torch::kFloat8_e5m2, f8e5m2, f16)
-TORCH_BINDING_REDUCE_PACK(f8e5m2, f16, torch::kFloat8_e5m2, f8e5m2, f16)
+TORCH_BINDING_REDUCE_SCALAR(f8e5m2_f16, f8e5m2, f16)
+TORCH_BINDING_REDUCE_PACK(f8e5m2x16_f16, f8e5m2, f16)
 
 // i8
-TORCH_BINDING_REDUCE_SCALAR(i8, i32, torch::kInt8, i8, i32)
-TORCH_BINDING_REDUCE_PACK(i8, i32, torch::kInt8, i8, i32)
+TORCH_BINDING_REDUCE_SCALAR(i8_i32, i8, i32)
+TORCH_BINDING_REDUCE_PACK(i8x16_i32, i8, i32)
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f32_f32)
@@ -479,22 +475,22 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f16_f32)
   TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f16x2_f16)
   TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_f16x2_f32)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f16_f16)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f16_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f16x8_f16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f16x8_f32)
 
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_bf16_bf16)
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_bf16_f32)
   TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_bf16x2_bf16)
   TORCH_BINDING_COMMON_EXTENSION(reduce_vector_sum_bf16x2_f32)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_bf16_bf16)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_bf16_f32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_bf16x8_bf16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_bf16x8_f32)
 
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f8e4m3_f16)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f8e4m3_f16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f8e4m3x16_f16)
 
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_f8e5m2_f16)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f8e5m2_f16)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_f8e5m2x16_f16)
 
   TORCH_BINDING_COMMON_EXTENSION(reduce_scalar_sum_i8_i32)
-  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_i8_i32)
+  TORCH_BINDING_COMMON_EXTENSION(reduce_pack_sum_i8x16_i32)
 }
