@@ -19,6 +19,45 @@ __forceinline__ __device__ auto butterfly_reduce_sum(T val) -> T {
   return val;
 }
 
+template <typename Vector, typename Sum>
+concept ThreadReduceable = requires(Vector v) {
+  { thread_reduce<Vector, Sum>(v) } -> std::same_as<Sum>;
+};
+
+template <typename Vector, typename Sum>
+auto __device__ __forceinline__ thread_reduce(Vector v) -> Sum = delete;
+
+template <>
+auto __device__ __forceinline__ thread_reduce<f32x4, f32>(f32x4 v) -> f32 {
+  return v.x + v.y + v.z + v.w;
+}
+
+template <>
+auto __device__ __forceinline__ thread_reduce<f16x2, f16>(f16x2 v) -> f16 {
+  return v.x + v.y;
+}
+
+template <>
+auto __device__ __forceinline__ thread_reduce<f16x2, f32>(f16x2 v) -> f32 {
+  return f32{v.x} + f32{v.y};
+}
+
+template <>
+auto __device__ __forceinline__ thread_reduce<b16x2, b16>(b16x2 v) -> b16 {
+  return v.x + v.y;
+}
+
+template <>
+auto __device__ __forceinline__ thread_reduce<b16x2, f32>(b16x2 v) -> f32 {
+  return f32{v.x} + f32{v.y};
+}
+
+static_assert(ThreadReduceable<f32x4, f32>);
+static_assert(ThreadReduceable<f16x2, f16>);
+static_assert(ThreadReduceable<f16x2, f32>);
+static_assert(ThreadReduceable<b16x2, b16>);
+static_assert(ThreadReduceable<b16x2, f32>);
+
 template <typename Scalar, typename Sum = Scalar,
           const int NUM_ELEM_PER_BLOCK = 256>
 __global__ auto reduce_scalar_kernel(const Scalar *__restrict__ input,
@@ -100,45 +139,6 @@ __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
     }
   }
 }
-
-template <typename Vector, typename Sum>
-concept ThreadReduceable = requires(Vector v) {
-  { thread_reduce<Vector, Sum>(v) } -> std::same_as<Sum>;
-};
-
-template <typename Vector, typename Sum>
-auto __device__ __forceinline__ thread_reduce(Vector v) -> Sum = delete;
-
-template <>
-auto __device__ __forceinline__ thread_reduce<f32x4, f32>(f32x4 v) -> f32 {
-  return v.x + v.y + v.z + v.w;
-}
-
-template <>
-auto __device__ __forceinline__ thread_reduce<f16x2, f16>(f16x2 v) -> f16 {
-  return v.x + v.y;
-}
-
-template <>
-auto __device__ __forceinline__ thread_reduce<f16x2, f32>(f16x2 v) -> f32 {
-  return f32{v.x} + f32{v.y};
-}
-
-template <>
-auto __device__ __forceinline__ thread_reduce<b16x2, b16>(b16x2 v) -> b16 {
-  return v.x + v.y;
-}
-
-template <>
-auto __device__ __forceinline__ thread_reduce<b16x2, f32>(b16x2 v) -> f32 {
-  return f32{v.x} + f32{v.y};
-}
-
-static_assert(ThreadReduceable<f32x4, f32>);
-static_assert(ThreadReduceable<f16x2, f16>);
-static_assert(ThreadReduceable<f16x2, f32>);
-static_assert(ThreadReduceable<b16x2, b16>);
-static_assert(ThreadReduceable<b16x2, f32>);
 
 template <typename Scalar, typename Sum = Scalar, typename Vector,
           const int NUM_ELEM_PER_BLOCK = 256>
