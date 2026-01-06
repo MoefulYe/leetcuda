@@ -82,6 +82,14 @@
                 source .venv/bin/activate
                 export PATH="''${PWD}/.venv/bin:''${PATH}"
                 export TORCH_CUDA_ARCH_LIST="8.6"
+
+                # Build a real ':'-separated PYTHONPATH (expand build/kernels/*/).
+                PYTHONPATH="''${PWD}/common:''${PYTHONPATH:-}"
+                for d in "''${PWD}"/build/kernels/*/; do
+                  [ -d "$d" ] || continue
+                  PYTHONPATH="$PYTHONPATH:$d"
+                done
+                export PYTHONPATH
               '';
           };
     };

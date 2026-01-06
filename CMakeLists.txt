@@ -47,7 +47,7 @@ target_compile_options(cuda_compile_flags INTERFACE
 )
 
 add_library(common INTERFACE)
-target_include_directories(common INTERFACE ./include)
+target_include_directories(common INTERFACE ./common)
 
 
 

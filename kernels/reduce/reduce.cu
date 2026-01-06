@@ -22,9 +22,9 @@
 #endif
 #endif
 
-#include <common.hpp>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <types.hpp>
 
 constexpr auto WARP_SIZE = 32;
 

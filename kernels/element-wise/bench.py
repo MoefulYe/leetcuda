@@ -1,14 +1,8 @@
-import os
-import sys
-from functools import partial
 import torch
-import element_wise as lib # type: ignore
 
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+import element_wise as lib  # type: ignore
 
-from bench_utils import run_benchmark  # noqa: E402
+from common.bench_utils import run_benchmark
 
 torch.set_grad_enabled(False)
 
@@ -23,19 +17,43 @@ for S, K in SKs:
     a = torch.randn((S, K)).cuda().float().contiguous()
     b = torch.randn((S, K)).cuda().float().contiguous()
     c = torch.zeros_like(a).cuda().float().contiguous()
-    run_benchmark(lib.elementwise_add_f32, a, b, "f32", c)
-    run_benchmark(lib.elementwise_add_f32x4, a, b, "f32x4", c)
-    run_benchmark(partial(torch.add, out=c), a, b, "f32_th")
+
+    def perf_f32() -> torch.Tensor:
+        lib.elementwise_add_f32(a, b, c)
+        return c
+
+    def perf_f32x4() -> torch.Tensor:
+        lib.elementwise_add_f32x4(a, b, c)
+        return c
+
+    run_benchmark(perf_f32, tag="f32")
+    run_benchmark(perf_f32x4, tag="f32x4")
+    run_benchmark(lambda: torch.add(a, b, out=c), tag="f32_th")
 
     print("-" * 85)
     a_f16 = a.half().contiguous()
     b_f16 = b.half().contiguous()
     c_f16 = c.half().contiguous()
-    run_benchmark(lib.elementwise_add_f16, a_f16, b_f16, "f16", c_f16)
-    run_benchmark(lib.elementwise_add_f16x2, a_f16, b_f16, "f16x2", c_f16)
-    run_benchmark(lib.elementwise_add_f16x8, a_f16, b_f16, "f16x8", c_f16)
-    run_benchmark(
-        lib.elementwise_add_f16x8_pack, a_f16, b_f16, "f16x8pack", c_f16
-    )
-    run_benchmark(partial(torch.add, out=c_f16), a_f16, b_f16, "f16_th")
+
+    def perf_f16() -> torch.Tensor:
+        lib.elementwise_add_f16(a_f16, b_f16, c_f16)
+        return c_f16
+
+    def perf_f16x2() -> torch.Tensor:
+        lib.elementwise_add_f16x2(a_f16, b_f16, c_f16)
+        return c_f16
+
+    def perf_f16x8() -> torch.Tensor:
+        lib.elementwise_add_f16x8(a_f16, b_f16, c_f16)
+        return c_f16
+
+    def perf_f16x8_pack() -> torch.Tensor:
+        lib.elementwise_add_f16x8_pack(a_f16, b_f16, c_f16)
+        return c_f16
+
+    run_benchmark(perf_f16, tag="f16")
+    run_benchmark(perf_f16x2, tag="f16x2")
+    run_benchmark(perf_f16x8, tag="f16x8")
+    run_benchmark(perf_f16x8_pack, tag="f16x8pack")
+    run_benchmark(lambda: torch.add(a_f16, b_f16, out=c_f16), tag="f16_th")
     print("-" * 85)
