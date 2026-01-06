@@ -5,7 +5,7 @@ import reduce as lib  # type: ignore
 
 lib: Any = lib
 
-from common.bench_utils import run_benchmark
+from bench_utils import run_benchmark
 
 
 torch.set_grad_enabled(False)

@@ -2,7 +2,7 @@ import torch
 
 import element_wise as lib  # type: ignore
 
-from common.bench_utils import run_benchmark
+from bench_utils import run_benchmark
 
 torch.set_grad_enabled(False)
 
