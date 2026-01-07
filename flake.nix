@@ -73,7 +73,7 @@
                 driver_lib32="/run/opengl-driver-32/lib"
 
 
-                export LD_LIBRARY_PATH="$driver_lib:$driver_lib32:${ld_libpath}"
+                export LD_LIBRARY_PATH="$driver_lib:$driver_lib32:${ld_libpath}:/nix/store/xx7cm72qy2c0643cm1ipngd87aqwkcdp-glibc-2.40-66/lib/"
 
                 # Create & activate a local venv via uv (install torch wheels inside it).
                 if [ ! -d ".venv" ]; then
