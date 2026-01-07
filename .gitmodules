@@ -1,0 +1,3 @@
+[submodule "others/nsys/nsight-training"]
+	path = others/nsys/nsight-training
+	url = git@github.com:NVIDIA/nsight-training.git
