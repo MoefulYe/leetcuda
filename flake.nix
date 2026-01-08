@@ -24,10 +24,24 @@
       llvm = pkgs.llvmPackages_21;
       clang-tools = llvm.clang-tools;
       stdenv = llvm.stdenv;
+      fhs = pkgs.buildFHSEnv {
+        name = "leetcuda-fhs";
+        targetPkgs = pkgs': [ pkgs'.glibc ];
+        runScript = "bash";
+      };
+      nsys = cudaPackages.nsight_systems;
+      ncu = cudaPackages.nsight_compute.overrideAttrs (old: {
+        postInstall = old.postInstall + ''
+          ln -s $out/bin/target/linux-desktop-glibc_2_11_3-x64 \
+            $out/bin/target/linux-desktop-glibc_2_11_3-x86
+          ln -s $out/sections $out/bin/sections
+        '';
+
+        meta.description = "";
+      });
     in
     {
       formatter.${system} = pkgs.alejandra;
-
       devShells.${system}.default =
         pkgs.mkShell.override
           {
@@ -36,9 +50,10 @@
           {
             name = "leetcuda";
             packages = with pkgs; [
+              fhs
               cudaPackages.cudatoolkit
-              cudaPackages.nsight_compute
-              cudaPackages.nsight_systems
+              ncu
+              nsys
               python
               pybind11
               uv
