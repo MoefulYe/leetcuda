@@ -15,6 +15,21 @@
           allowUnfree = true;
           cudaSupport = true;
         };
+        overlays = [
+          (self: super: {
+            cudaPackages = super.cudaPackages // {
+              nsight_compute = super.cudaPackages.nsight_compute.overrideAttrs (old: {
+                postInstall = old.postInstall + ''
+                  ln -s $out/bin/target/linux-desktop-glibc_2_11_3-x64 \
+                    $out/bin/target/linux-desktop-glibc_2_11_3-x86
+                  ln -s $out/sections $out/bin/sections
+                '';
+
+                meta.description = "";
+              });
+            };
+          })
+        ];
       };
 
       pythonPackages = pkgs.python312Packages;
@@ -29,16 +44,6 @@
         targetPkgs = pkgs': [ pkgs'.glibc ];
         runScript = "bash";
       };
-      nsys = cudaPackages.nsight_systems;
-      ncu = cudaPackages.nsight_compute.overrideAttrs (old: {
-        postInstall = old.postInstall + ''
-          ln -s $out/bin/target/linux-desktop-glibc_2_11_3-x64 \
-            $out/bin/target/linux-desktop-glibc_2_11_3-x86
-          ln -s $out/sections $out/bin/sections
-        '';
-
-        meta.description = "";
-      });
     in
     {
       formatter.${system} = pkgs.alejandra;
@@ -52,8 +57,8 @@
             packages = with pkgs; [
               fhs
               cudaPackages.cudatoolkit
-              ncu
-              nsys
+              cudaPackages.nsight_systems
+              cudaPackages.nsight_compute
               python
               pybind11
               uv
