@@ -79,8 +79,15 @@ __device__ __host__ __forceinline__ auto lowest() -> T = delete;
 template <typename T>
 __device__ __host__ __forceinline__ auto greatest() -> T = delete;
 
+template <typename T>
+__device__ __host__ __forceinline__ auto one() -> T = delete;
+
 template <> __device__ __host__ __forceinline__ auto zero<f32>() -> f32 {
   return 0.0f;
+}
+
+template <> __device__ __host__ __forceinline__ auto one<f32>() -> f32 {
+  return 1.0f;
 }
 
 template <> __device__ __host__ __forceinline__ auto lowest<f32>() -> f32 {
@@ -95,6 +102,10 @@ template <> __device__ __host__ __forceinline__ auto zero<f64>() -> f64 {
   return 0.0;
 }
 
+template <> __device__ __host__ __forceinline__ auto one<f64>() -> f64 {
+  return 1.0;
+}
+
 template <> __device__ __host__ __forceinline__ auto lowest<f64>() -> f64 {
   return cuda::std::numeric_limits<f64>::lowest();
 }
@@ -105,6 +116,10 @@ template <> __device__ __host__ __forceinline__ auto greatest<f64>() -> f64 {
 
 template <> __device__ __host__ __forceinline__ auto zero<i8>() -> i8 {
   return static_cast<i8>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto one<i8>() -> i8 {
+  return static_cast<i8>(1);
 }
 
 template <> __device__ __host__ __forceinline__ auto lowest<i8>() -> i8 {
@@ -119,6 +134,10 @@ template <> __device__ __host__ __forceinline__ auto zero<i16>() -> i16 {
   return static_cast<i16>(0);
 }
 
+template <> __device__ __host__ __forceinline__ auto one<i16>() -> i16 {
+  return static_cast<i16>(1);
+}
+
 template <> __device__ __host__ __forceinline__ auto lowest<i16>() -> i16 {
   return cuda::std::numeric_limits<i16>::lowest();
 }
@@ -129,6 +148,10 @@ template <> __device__ __host__ __forceinline__ auto greatest<i16>() -> i16 {
 
 template <> __device__ __host__ __forceinline__ auto zero<i32>() -> i32 {
   return static_cast<i32>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto one<i32>() -> i32 {
+  return static_cast<i32>(1);
 }
 
 template <> __device__ __host__ __forceinline__ auto lowest<i32>() -> i32 {
@@ -143,6 +166,10 @@ template <> __device__ __host__ __forceinline__ auto zero<i64>() -> i64 {
   return static_cast<i64>(0);
 }
 
+template <> __device__ __host__ __forceinline__ auto one<i64>() -> i64 {
+  return static_cast<i64>(1);
+}
+
 template <> __device__ __host__ __forceinline__ auto lowest<i64>() -> i64 {
   return cuda::std::numeric_limits<i64>::lowest();
 }
@@ -153,6 +180,10 @@ template <> __device__ __host__ __forceinline__ auto greatest<i64>() -> i64 {
 
 template <> __device__ __host__ __forceinline__ auto zero<u8>() -> u8 {
   return static_cast<u8>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto one<u8>() -> u8 {
+  return static_cast<u8>(1);
 }
 
 template <> __device__ __host__ __forceinline__ auto lowest<u8>() -> u8 {
@@ -167,6 +198,10 @@ template <> __device__ __host__ __forceinline__ auto zero<u16>() -> u16 {
   return static_cast<u16>(0);
 }
 
+template <> __device__ __host__ __forceinline__ auto one<u16>() -> u16 {
+  return static_cast<u16>(1);
+}
+
 template <> __device__ __host__ __forceinline__ auto lowest<u16>() -> u16 {
   return cuda::std::numeric_limits<u16>::lowest();
 }
@@ -177,6 +212,10 @@ template <> __device__ __host__ __forceinline__ auto greatest<u16>() -> u16 {
 
 template <> __device__ __host__ __forceinline__ auto zero<u32>() -> u32 {
   return static_cast<u32>(0);
+}
+
+template <> __device__ __host__ __forceinline__ auto one<u32>() -> u32 {
+  return static_cast<u32>(1);
 }
 
 template <> __device__ __host__ __forceinline__ auto lowest<u32>() -> u32 {
@@ -191,6 +230,10 @@ template <> __device__ __host__ __forceinline__ auto zero<u64>() -> u64 {
   return static_cast<u64>(0);
 }
 
+template <> __device__ __host__ __forceinline__ auto one<u64>() -> u64 {
+  return static_cast<u64>(1);
+}
+
 template <> __device__ __host__ __forceinline__ auto lowest<u64>() -> u64 {
   return cuda::std::numeric_limits<u64>::lowest();
 }
@@ -201,6 +244,10 @@ template <> __device__ __host__ __forceinline__ auto greatest<u64>() -> u64 {
 
 template <> __device__ __host__ __forceinline__ auto zero<f16>() -> f16 {
   return f16{};
+}
+
+template <> __device__ __host__ __forceinline__ auto one<f16>() -> f16 {
+  return static_cast<f16>(1.0f);
 }
 
 template <> __device__ __host__ __forceinline__ auto lowest<f16>() -> f16 {
@@ -215,6 +262,10 @@ template <> __device__ __host__ __forceinline__ auto zero<bf16>() -> bf16 {
   return bf16{};
 }
 
+template <> __device__ __host__ __forceinline__ auto one<bf16>() -> bf16 {
+  return static_cast<bf16>(1.0f);
+}
+
 template <> __device__ __host__ __forceinline__ auto lowest<bf16>() -> bf16 {
   return cuda::std::numeric_limits<bf16>::lowest();
 }
@@ -225,6 +276,10 @@ template <> __device__ __host__ __forceinline__ auto greatest<bf16>() -> bf16 {
 
 template <> __device__ __host__ __forceinline__ auto zero<f8e4m3>() -> f8e4m3 {
   return f8e4m3{};
+}
+
+template <> __device__ __host__ __forceinline__ auto one<f8e4m3>() -> f8e4m3 {
+  return static_cast<f8e4m3>(1.0f);
 }
 
 template <>
@@ -239,6 +294,10 @@ __device__ __host__ __forceinline__ auto greatest<f8e4m3>() -> f8e4m3 {
 
 template <> __device__ __host__ __forceinline__ auto zero<f8e5m2>() -> f8e5m2 {
   return f8e5m2{};
+}
+
+template <> __device__ __host__ __forceinline__ auto one<f8e5m2>() -> f8e5m2 {
+  return static_cast<f8e5m2>(1.0f);
 }
 
 template <>

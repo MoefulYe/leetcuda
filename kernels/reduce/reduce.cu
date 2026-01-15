@@ -26,6 +26,7 @@
 #include <cuda_runtime.h>
 #include <types.hpp>
 
+using namespace leetcuda;
 constexpr auto WARP_SIZE = 32;
 
 template <typename T>
@@ -158,10 +159,10 @@ __global__ auto reduce_pack_kernel(const Scalar *__restrict__ input,
   }
 }
 
-template <typename Scalar, typename Vector, typename Acc = Scalar,
+template <typename Vector, typename Acc = ScalarOf<Vector>,
           const int NUM_ELEM_PER_BLOCK = 256>
-  requires IsVectorOf<Vector, Scalar> && ThreadReduceable<Vector, Acc>
-__global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
+  requires ThreadReduceable<Vector, Acc>
+__global__ auto reduce_vector_kernel(const ScalarOf<Vector> *__restrict__ input,
                                      Acc *__restrict__ output, int n) -> void {
   static_assert(NUM_ELEM_PER_BLOCK % VectorTraits<Vector>::SIZE == 0,
                 "NUM_ELEM_PER_BLOCK must be multiple of Vector::SIZE");
@@ -249,8 +250,8 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
   do {                                                                         \
     constexpr int V = VectorTraits<vec_t>::SIZE;                               \
     dim3 block((NT) / V);                                                      \
-    reduce_vector_kernel<scalar_t, vec_t, acc_t, (NT)>                         \
-        <<<(grid), block>>>((x_ptr), (y_ptr), (n));                            \
+    reduce_vector_kernel<vec_t, acc_t, (NT)><<<(grid), block>>>(               \
+        reinterpret_cast<const ScalarOf<vec_t> *>(x_ptr), (y_ptr), (n));       \
   } while (0)
 
 #define DISPATCH_REDUCE_VECTOR_KERNEL(K, grid, scalar_t, vec_t, acc_t, x_ptr,  \
@@ -360,8 +361,9 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
     return y;                                                                  \
   }
 
-#define TORCH_BINDING_REDUCE_VECTOR(tag, Scalar, Vec, Acc)                     \
+#define TORCH_BINDING_REDUCE_VECTOR(tag, Vec, Acc)                             \
   torch::Tensor reduce_vector_sum_##tag(torch::Tensor x) {                     \
+    using Scalar = ScalarOf<Vec>;                                              \
     static_assert(IsVectorOf<Vec, Scalar>,                                     \
                   "IsVectorOf failed for " STRINGFY(Vec));                     \
     static_assert(ThreadReduceable<Vec, Acc>,                                  \
@@ -437,21 +439,21 @@ __global__ auto reduce_vector_kernel(const Scalar *__restrict__ input,
 
 // f32
 TORCH_BINDING_REDUCE_SCALAR(f32_f32, f32, f32)
-TORCH_BINDING_REDUCE_VECTOR(f32x4_f32, f32, f32x4, f32)
+TORCH_BINDING_REDUCE_VECTOR(f32x4_f32, f32x4, f32)
 
 // f16
 TORCH_BINDING_REDUCE_SCALAR(f16_f16, f16, f16)
 TORCH_BINDING_REDUCE_SCALAR(f16_f32, f16, f32)
-TORCH_BINDING_REDUCE_VECTOR(f16x2_f16, f16, f16x2, f16)
-TORCH_BINDING_REDUCE_VECTOR(f16x2_f32, f16, f16x2, f32)
+TORCH_BINDING_REDUCE_VECTOR(f16x2_f16, f16x2, f16)
+TORCH_BINDING_REDUCE_VECTOR(f16x2_f32, f16x2, f32)
 TORCH_BINDING_REDUCE_PACK(f16x8_f16, f16, f16)
 TORCH_BINDING_REDUCE_PACK(f16x8_f32, f16, f32)
 
 // bf16
 TORCH_BINDING_REDUCE_SCALAR(bf16_bf16, bf16, bf16)
 TORCH_BINDING_REDUCE_SCALAR(bf16_f32, bf16, f32)
-TORCH_BINDING_REDUCE_VECTOR(bf16x2_bf16, bf16, bf16x2, bf16)
-TORCH_BINDING_REDUCE_VECTOR(bf16x2_f32, bf16, bf16x2, f32)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2_bf16, bf16x2, bf16)
+TORCH_BINDING_REDUCE_VECTOR(bf16x2_f32, bf16x2, f32)
 TORCH_BINDING_REDUCE_PACK(bf16x8_bf16, bf16, bf16)
 TORCH_BINDING_REDUCE_PACK(bf16x8_f32, bf16, f32)
 
