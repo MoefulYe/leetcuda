@@ -15,27 +15,23 @@
           allowUnfree = true;
           cudaSupport = true;
         };
-        overlays = [
-          (self: super: {
-            cudaPackages = super.cudaPackages // {
-              nsight_compute = super.cudaPackages.nsight_compute.overrideAttrs (old: {
-                postInstall = old.postInstall + ''
-                  ln -s $out/bin/target/linux-desktop-glibc_2_11_3-x64 \
-                    $out/bin/target/linux-desktop-glibc_2_11_3-x86
-                  ln -s $out/sections $out/bin/sections
-                '';
-
-                meta.description = "";
-              });
-            };
-          })
-        ];
       };
 
       pythonPackages = pkgs.python312Packages;
       python = pythonPackages.python;
       pybind11 = pythonPackages.pybind11;
-      cudaPackages = pkgs.cudaPackages_12_8;
+      _cudaPackages = pkgs.cudaPackages_12_8;
+      cudaPackages = _cudaPackages // {
+        nsight_compute = _cudaPackages.nsight_compute.overrideAttrs (old: {
+          postInstall = old.postInstall + ''
+            ln -s $out/bin/target/linux-desktop-glibc_2_11_3-x64 \
+              $out/bin/target/linux-desktop-glibc_2_11_3-x86
+            ln -s $out/sections $out/bin/sections
+          '';
+
+          meta.description = "";
+        });
+      };
       llvm = pkgs.llvmPackages_21;
       clang-tools = llvm.clang-tools;
       stdenv = llvm.stdenv;
